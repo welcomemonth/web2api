@@ -12,7 +12,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	pw "github.com/playwright-community/playwright-go"
 	"hash/fnv"
 	"html"
 	"io"
@@ -35,6 +34,8 @@ import (
 	"syscall"
 	"time"
 
+	pw "github.com/playwright-community/playwright-go"
+
 	"qwen2api-go/adapter"
 	apidesc "qwen2api-go/api"
 	"qwen2api-go/core"
@@ -42,6 +43,7 @@ import (
 	"qwen2api-go/services"
 	"qwen2api-go/toolcall"
 	"qwen2api-go/upstream"
+	"qwen2api-go/utils"
 )
 
 // ---- migrated from main.go ----
@@ -2466,15 +2468,15 @@ func (app *App) withCORS(next http.Handler) http.Handler {
 }
 
 func (app *App) handleAPI(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "qwen2API Enterprise Gateway is running", "docs": "/docs", "version": Version})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"status": "qwen2API Enterprise Gateway is running", "docs": "/docs", "version": Version})
 }
 
 func (app *App) handleHealth(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 }
 
 func (app *App) handleReady(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ready", "accounts": app.accounts.Status()})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"status": "ready", "accounts": app.accounts.Status()})
 }
 
 func (app *App) handleKeepAlive(w http.ResponseWriter, r *http.Request) {
@@ -2482,7 +2484,7 @@ func (app *App) handleKeepAlive(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"status": "ok", "version": Version})
 }
 
 func (app *App) handleSPA(w http.ResponseWriter, r *http.Request) {
@@ -2502,10 +2504,11 @@ func (app *App) handleSPA(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, filepath.Join(app.settings.FrontendDist, "index.html"))
 }
 
+// 鉴权函数，TODO 后续使用gin框架做一个中间件即可，不再每个接口都手动调用这个内容
 func (app *App) resolveAuth(w http.ResponseWriter, r *http.Request) (*AuthContext, bool) {
 	token := extractAPIToken(r)
 	if token == "" {
-		writeError(w, http.StatusUnauthorized, "Invalid API Key")
+		utils.WriteError(w, http.StatusUnauthorized, "Invalid API Key")
 		return nil, false
 	}
 	var users []map[string]any
@@ -2518,14 +2521,14 @@ func (app *App) resolveAuth(w http.ResponseWriter, r *http.Request) (*AuthContex
 		}
 	}
 	if len(app.apiKeys) > 0 && token != app.settings.AdminKey && !app.apiKeys[token] && user == nil {
-		writeError(w, http.StatusUnauthorized, "Invalid API Key")
+		utils.WriteError(w, http.StatusUnauthorized, "Invalid API Key")
 		return nil, false
 	}
 	if user != nil {
 		quota := intValue(user, "quota", 0)
 		used := intValue(user, "used_tokens", 0)
 		if quota > 0 && used >= quota {
-			writeError(w, http.StatusPaymentRequired, "Quota Exceeded")
+			utils.WriteError(w, http.StatusPaymentRequired, "Quota Exceeded")
 			return nil, false
 		}
 	}
@@ -2535,11 +2538,11 @@ func (app *App) resolveAuth(w http.ResponseWriter, r *http.Request) (*AuthContex
 func (app *App) verifyAdmin(w http.ResponseWriter, r *http.Request) (string, bool) {
 	token := extractAPIToken(r)
 	if token == "" {
-		writeError(w, http.StatusUnauthorized, "Unauthorized")
+		utils.WriteError(w, http.StatusUnauthorized, "Unauthorized")
 		return "", false
 	}
 	if token != app.settings.AdminKey && !app.apiKeys[token] {
-		writeError(w, http.StatusForbidden, "Forbidden: Admin Key Mismatch")
+		utils.WriteError(w, http.StatusForbidden, "Forbidden: Admin Key Mismatch")
 		return "", false
 	}
 	return token, true
@@ -4387,7 +4390,7 @@ func (app *App) classifyAccountErrorFor(acc *Account, err error, usage string) {
 		}
 		return
 	}
-	if isTransientUpstreamErrorMessage(lower) {
+	if utils.IsTransientUpstreamErrorMessage(lower) {
 		usage = normalizeAccountUsage(usage)
 		cooldown := transientUpstreamCooldownSeconds(app.settings)
 		app.accounts.MarkRateLimitedFor(acc, usage, cooldown, msg)
@@ -4502,67 +4505,8 @@ func isRetryableCreateChatError(err error) bool {
 	if isModelNotFoundErrorMessage(msg) {
 		return false
 	}
-	if isRateLimitErrorMessage(msg) || isTransientUpstreamErrorMessage(msg) {
+	if isRateLimitErrorMessage(msg) || utils.IsTransientUpstreamErrorMessage(msg) {
 		return true
-	}
-	return false
-}
-
-func isTransientUpstreamErrorMessage(lower string) bool {
-	lower = strings.ToLower(lower)
-	if strings.TrimSpace(lower) == "" {
-		return false
-	}
-	if strings.Contains(lower, "http 500") ||
-		strings.Contains(lower, "http 502") ||
-		strings.Contains(lower, "http 503") ||
-		strings.Contains(lower, "http 504") ||
-		strings.Contains(lower, "status 500") ||
-		strings.Contains(lower, "status 502") ||
-		strings.Contains(lower, "status 503") ||
-		strings.Contains(lower, "status 504") ||
-		strings.Contains(lower, "status=500") ||
-		strings.Contains(lower, "status=502") ||
-		strings.Contains(lower, "status=503") ||
-		strings.Contains(lower, "status=504") {
-		return true
-	}
-	for _, marker := range []string{
-		"create_chat parse error",
-		"invalid character '<'",
-		"<!doctype",
-		"<html",
-		"aliyun_waf",
-		"waf",
-		"captcha",
-		"security check",
-		"please enable javascript",
-		"context deadline exceeded",
-		"i/o timeout",
-		"net/http: request canceled",
-		"timeout",
-		"timed out",
-		"wsarecv",
-		"connection attempt failed",
-		"connected party did not properly respond",
-		"connected host has failed to respond",
-		"failed to respond",
-		"connection reset",
-		"connection refused",
-		"connection aborted",
-		"connection closed",
-		"connection timed out",
-		"server closed idle connection",
-		"unexpected eof",
-		"temporary failure",
-		"temporarily unavailable",
-		"bad gateway",
-		"gateway timeout",
-		"service unavailable",
-	} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
 	}
 	return false
 }
@@ -4610,7 +4554,7 @@ func shouldMaskUpstreamErrorMessage(msg string) bool {
 		"context deadline exceeded",
 		"i/o timeout",
 	} {
-		if strings.Contains(lower, marker) && isTransientUpstreamErrorMessage(lower) {
+		if strings.Contains(lower, marker) && utils.IsTransientUpstreamErrorMessage(lower) {
 			return true
 		}
 	}
@@ -4674,12 +4618,12 @@ func (app *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "Invalid JSON body", "type": "invalid_request_error"}})
+		utils.WriteError(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "Invalid JSON body", "type": "invalid_request_error"}})
 		return
 	}
 	req, err := app.prepareStandardRequest(r.Context(), r, body, "gpt-3.5-turbo", "openai", auth.Token)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	app.recordStandardRequest(r.Context(), req)
@@ -4691,10 +4635,10 @@ func (app *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := app.runCompletion(r.Context(), req, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, buildOpenAICompletionPayload(id, created, req, result))
+	utils.WriteJSON(w, http.StatusOK, buildOpenAICompletionPayload(id, created, req, result))
 }
 
 func (app *App) streamOpenAI(w http.ResponseWriter, r *http.Request, req StandardRequest, id string, created int64) {
@@ -4866,17 +4810,17 @@ func (app *App) handleListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	upstream, err := app.client.ListModelsFromPool(r.Context())
 	if err == nil && len(upstream) > 0 {
-		writeJSON(w, http.StatusOK, buildOpenAIModelList(upstream))
+		utils.WriteJSON(w, http.StatusOK, buildOpenAIModelList(upstream))
 		return
 	}
-	writeJSON(w, http.StatusOK, buildFallbackModelList())
+	utils.WriteJSON(w, http.StatusOK, buildFallbackModelList())
 }
 
 func (app *App) handleGetModel(w http.ResponseWriter, r *http.Request) {
 	modelID := r.PathValue("model_id")
 	mode := parseModelMode(modelID, "")
 	if mode.BaseModel == "" {
-		writeError(w, http.StatusNotFound, map[string]any{"error": map[string]any{"message": "Model '" + modelID + "' not found", "type": "invalid_request_error"}})
+		utils.WriteError(w, http.StatusNotFound, map[string]any{"error": map[string]any{"message": "Model '" + modelID + "' not found", "type": "invalid_request_error"}})
 		return
 	}
 	caps := map[string]bool{}
@@ -4900,7 +4844,7 @@ func (app *App) handleGetModel(w http.ResponseWriter, r *http.Request) {
 	resolved := resolveModel(mode.BaseModel)
 	payload := buildModelEntry(modelID, mode.BaseModel, caps, mode.Mode, modelID, strings.SplitN(resolved, "-", 2)[0], 0, "qwen2api")
 	payload["resolved_model"] = resolved
-	writeJSON(w, http.StatusOK, payload)
+	utils.WriteJSON(w, http.StatusOK, payload)
 }
 
 func (app *App) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
@@ -4910,7 +4854,7 @@ func (app *App) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	model := stringValue(body, "model", "text-embedding-ada-002")
@@ -4933,7 +4877,7 @@ func (app *App) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		data = append(data, map[string]any{"object": "embedding", "embedding": pseudoEmbedding(text), "index": i})
 	}
 	app.addUsedTokens(auth.Token, total)
-	writeJSON(w, http.StatusOK, map[string]any{
+	utils.WriteJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
 		"data":   data,
 		"model":  model,
@@ -4965,13 +4909,13 @@ func (app *App) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	converted := responsesToChatBody(body)
 	req, err := app.prepareStandardRequest(r.Context(), r, converted, "gpt-3.5-turbo", "responses", auth.Token)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	app.recordStandardRequest(r.Context(), req)
@@ -4982,7 +4926,7 @@ func (app *App) handleResponses(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := app.runCompletion(r.Context(), req, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	output := []map[string]any{}
@@ -5003,7 +4947,7 @@ func (app *App) handleResponses(w http.ResponseWriter, r *http.Request) {
 			"content": content,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	utils.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": id, "object": "response", "created_at": time.Now().Unix(), "status": "completed", "model": req.ResponseModel,
 		"output": output, "parallel_tool_calls": true, "error": nil, "incomplete_details": nil,
 		"output_text": outputText,
@@ -5401,7 +5345,7 @@ func (app *App) handleAnthropicCountTokens(w http.ResponseWriter, r *http.Reques
 	var body map[string]any
 	_ = decodeJSON(r, &body)
 	prompt := anthropicPrompt(body)
-	writeJSON(w, http.StatusOK, map[string]any{"input_tokens": len(prompt)})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"input_tokens": len(prompt)})
 }
 
 func (app *App) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
@@ -5411,7 +5355,7 @@ func (app *App) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) 
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	chatBody := map[string]any{"model": body["model"], "messages": anthropicMessages(body), "stream": body["stream"], "tools": body["tools"]}
@@ -5422,7 +5366,7 @@ func (app *App) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) 
 	}
 	req, err := app.prepareStandardRequest(r.Context(), r, chatBody, "claude-3-haiku", "anthropic", auth.Token)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	app.recordStandardRequest(r.Context(), req)
@@ -5441,10 +5385,10 @@ func (app *App) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) 
 	}
 	result, err := app.runCompletion(r.Context(), req, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, app.buildAnthropicPayload(r.Context(), id, req.ResponseModel, req.Prompt, req, result, "json_response"))
+	utils.WriteJSON(w, http.StatusOK, app.buildAnthropicPayload(r.Context(), id, req.ResponseModel, req.Prompt, req, result, "json_response"))
 }
 
 func anthropicMessages(body map[string]any) []any {
@@ -5607,7 +5551,7 @@ func (app *App) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	model := geminiModelFromPath(r.URL.Path)
@@ -5615,10 +5559,10 @@ func (app *App) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 	app.recordStandardRequest(r.Context(), req)
 	result, err := app.runCompletion(r.Context(), req, "")
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, geminiPayload(result.AnswerText))
+	utils.WriteJSON(w, http.StatusOK, geminiPayload(result.AnswerText))
 }
 
 func (app *App) handleGeminiStream(w http.ResponseWriter, r *http.Request) {
@@ -5627,7 +5571,7 @@ func (app *App) handleGeminiStream(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	model := geminiModelFromPath(r.URL.Path)
@@ -5695,27 +5639,27 @@ func (app *App) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := r.ParseMultipartForm(256 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "file is required")
+		utils.WriteError(w, http.StatusBadRequest, "file is required")
 		return
 	}
 	defer file.Close()
 	ext := fileExt(header.Filename)
 	if !splitExts(app.settings.ContextAllowedUserExts)[ext] {
-		writeError(w, http.StatusBadRequest, "Unsupported file extension: "+ext)
+		utils.WriteError(w, http.StatusBadRequest, "Unsupported file extension: "+ext)
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(file, 128<<20))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(raw) == 0 {
-		writeError(w, http.StatusBadRequest, "Empty file")
+		utils.WriteError(w, http.StatusBadRequest, "Empty file")
 		return
 	}
 	contentType := header.Header.Get("Content-Type")
@@ -5724,10 +5668,10 @@ func (app *App) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	record, err := app.saveLocalBytes(header.Filename, contentType, raw, "upload", "user-upload", auth.Token, false)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	utils.WriteJSON(w, http.StatusOK, map[string]any{
 		"id": record.ID, "object": "file", "filename": record.Filename, "bytes": len(raw),
 		"content_type": record.ContentType, "created_at": record.CreatedAt,
 		"content_block": map[string]any{"type": "input_file", "file_id": record.ID, "filename": record.Filename, "mime_type": record.ContentType},
@@ -5742,7 +5686,7 @@ func (app *App) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	fileID := r.PathValue("file_id")
 	records, err := app.loadUploadedLocalFiles()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	next := records[:0]
@@ -5754,7 +5698,7 @@ func (app *App) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		}
 		found = true
 		if record.OwnerToken != "" && record.OwnerToken != auth.Token {
-			writeError(w, http.StatusForbidden, "Forbidden")
+			utils.WriteError(w, http.StatusForbidden, "Forbidden")
 			return
 		}
 		if record.Path != "" {
@@ -5762,11 +5706,11 @@ func (app *App) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !found {
-		writeError(w, http.StatusNotFound, "File not found")
+		utils.WriteError(w, http.StatusNotFound, "File not found")
 		return
 	}
 	_ = app.saveUploadedLocalFiles(next)
-	writeJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": fileID})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"deleted": true, "id": fileID})
 }
 
 func (app *App) handleImages(w http.ResponseWriter, r *http.Request) {
@@ -5775,12 +5719,12 @@ func (app *App) handleImages(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	prompt := strings.TrimSpace(stringValue(body, "prompt", ""))
 	if prompt == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+		utils.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
 	n := min(max(1, intValue(body, "n", 1)), 4)
@@ -5795,7 +5739,7 @@ func (app *App) handleImages(w http.ResponseWriter, r *http.Request) {
 	urls, lastErr := app.createImageURLs(r.Context(), model, promptText, map[string]any{"size": size, "ratio": ratio, "width": width, "height": height})
 	if lastErr != nil {
 		app.logWarn(r.Context(), "图片生成失败", "error", lastErr)
-		writeError(w, upstreamMediaErrorStatus(lastErr), lastErr.Error())
+		utils.WriteError(w, upstreamMediaErrorStatus(lastErr), lastErr.Error())
 		return
 	}
 	data := []map[string]any{}
@@ -5807,11 +5751,11 @@ func (app *App) handleImages(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(data) == 0 {
 		app.logWarn(r.Context(), "图片生成没有可返回的图片链接", "url_count", len(urls))
-		writeError(w, http.StatusInternalServerError, "Image generation produced no image URL")
+		utils.WriteError(w, http.StatusInternalServerError, "Image generation produced no image URL")
 		return
 	}
 	app.logInfo(r.Context(), "图片生成完成", "returned", len(data))
-	writeJSON(w, http.StatusOK, map[string]any{"created": time.Now().Unix(), "data": data})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"created": time.Now().Unix(), "data": data})
 }
 
 func (app *App) createImageURLs(ctx context.Context, model, promptText string, imageOptions map[string]any) ([]string, error) {
@@ -5909,12 +5853,12 @@ func (app *App) handleVideos(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	prompt := strings.TrimSpace(stringValue(body, "prompt", ""))
 	if prompt == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
+		utils.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
 	n := min(max(1, intValue(body, "n", 1)), 2)
@@ -5928,7 +5872,7 @@ func (app *App) handleVideos(w http.ResponseWriter, r *http.Request) {
 	urls, lastErr := app.createVideoURLs(r.Context(), model, promptText, map[string]any{"size": size, "ratio": ratio, "width": width, "height": height, "duration": duration})
 	if lastErr != nil {
 		app.logWarn(r.Context(), "视频生成失败", "error", lastErr)
-		writeError(w, upstreamMediaErrorStatus(lastErr), lastErr.Error())
+		utils.WriteError(w, upstreamMediaErrorStatus(lastErr), lastErr.Error())
 		return
 	}
 	data := []map[string]any{}
@@ -5940,11 +5884,11 @@ func (app *App) handleVideos(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(data) == 0 {
 		app.logWarn(r.Context(), "视频生成未识别到视频链接")
-		writeError(w, http.StatusInternalServerError, "Video generation produced no video URL")
+		utils.WriteError(w, http.StatusInternalServerError, "Video generation produced no video URL")
 		return
 	}
 	app.logInfo(r.Context(), "视频生成完成", "returned", len(data))
-	writeJSON(w, http.StatusOK, map[string]any{"created": time.Now().Unix(), "data": data})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"created": time.Now().Unix(), "data": data})
 }
 
 func (app *App) createVideoURLs(ctx context.Context, model, promptText string, videoOptions map[string]any) ([]string, error) {
@@ -6359,7 +6303,7 @@ func (app *App) adminStatus(w http.ResponseWriter, r *http.Request) {
 			"rate_limit_strikes": acc.RateLimitStrikes, "last_request_finished": acc.LastRequestFinished,
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	utils.WriteJSON(w, http.StatusOK, map[string]any{
 		"accounts":           app.accounts.Status(),
 		"per_account":        perAccount,
 		"chat_id_pool":       app.chatPool.Status(),
@@ -6375,7 +6319,7 @@ func (app *App) adminListUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	var users []map[string]any
 	_ = app.usersStore.LoadInto(&users)
-	writeJSON(w, http.StatusOK, map[string]any{"users": users})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"users": users})
 }
 
 func (app *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
@@ -6384,7 +6328,7 @@ func (app *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	var users []map[string]any
@@ -6392,7 +6336,7 @@ func (app *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	user := map[string]any{"id": "sk-" + randomID(), "name": stringValue(body, "name", ""), "quota": intValue(body, "quota", 1000000), "used_tokens": 0}
 	users = append(users, user)
 	_ = app.usersStore.Save(users)
-	writeJSON(w, http.StatusOK, user)
+	utils.WriteJSON(w, http.StatusOK, user)
 }
 
 func (app *App) adminListAccounts(w http.ResponseWriter, r *http.Request) {
@@ -6411,7 +6355,7 @@ func (app *App) adminListAccounts(w http.ResponseWriter, r *http.Request) {
 			"rate_limits": cloneRateLimits(acc.RateLimits),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"accounts": accounts})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"accounts": accounts})
 }
 
 func (app *App) adminAddAccount(w http.ResponseWriter, r *http.Request) {
@@ -6420,12 +6364,12 @@ func (app *App) adminAddAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	token := stringValue(body, "token", "")
 	if token == "" {
-		writeError(w, http.StatusBadRequest, "token is required")
+		utils.WriteError(w, http.StatusBadRequest, "token is required")
 		return
 	}
 	acc := Account{
@@ -6438,14 +6382,14 @@ func (app *App) adminAddAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	verify := app.client.VerifyTokenDetail(r.Context(), token)
 	if !verify.Valid {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Invalid token (验证失败，请确认Token有效)", "status_code": verify.StatusCode, "detail": verify.Error})
+		utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Invalid token (验证失败，请确认Token有效)", "status_code": verify.StatusCode, "detail": verify.Error})
 		return
 	}
 	if err := app.accounts.Add(acc); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "email": acc.Email})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "email": acc.Email})
 }
 
 func (app *App) adminVerifyAll(w http.ResponseWriter, r *http.Request) {
@@ -6468,7 +6412,7 @@ func (app *App) adminVerifyAll(w http.ResponseWriter, r *http.Request) {
 			bannedCount++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": results, "summary": map[string]any{"total": len(results), "valid": validCount, "refreshed": 0, "banned": bannedCount, "failed": len(results) - validCount}, "concurrency": 1})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "results": results, "summary": map[string]any{"total": len(results), "valid": validCount, "refreshed": 0, "banned": bannedCount, "failed": len(results) - validCount}, "concurrency": 1})
 }
 
 func (app *App) adminActivateAccount(w http.ResponseWriter, r *http.Request) {
@@ -6487,7 +6431,7 @@ func (app *App) adminActivateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if target == nil {
 		app.logWarn(r.Context(), "账号激活目标不存在", "account", email)
-		writeError(w, http.StatusNotFound, "Account not found")
+		utils.WriteError(w, http.StatusNotFound, "Account not found")
 		return
 	}
 	if target.Valid && target.Token != "" && !target.ActivationPending {
@@ -6495,7 +6439,7 @@ func (app *App) adminActivateAccount(w http.ResponseWriter, r *http.Request) {
 		if verify.Valid {
 			_ = app.accounts.MarkVerification(target.Email, verify)
 			app.logInfo(r.Context(), "账号已激活，现有 token 验证通过", "account", email)
-			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "账号已激活，现有 token 验证通过"})
+			utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "账号已激活，现有 token 验证通过"})
 			return
 		}
 		app.logWarn(r.Context(), "账号标记有效但现有 token 验证失败，继续激活流程", "account", email, "status_code", verify.StatusCode, "error", verify.Error)
@@ -6509,16 +6453,16 @@ func (app *App) adminActivateAccount(w http.ResponseWriter, r *http.Request) {
 			msg = err.Error()
 		}
 		app.logWarn(r.Context(), "账号激活失败", "account", email, "error", msg)
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": msg})
+		utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": false, "error": msg})
 		return
 	}
 	if err := app.accounts.Add(updated); err != nil {
 		app.logWarn(r.Context(), "账号激活保存失败", "account", email, "error", err)
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	app.logInfo(r.Context(), "账号激活成功", "account", email)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "账号激活成功"})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "message": "账号激活成功"})
 }
 
 func (app *App) adminVerifyAccount(w http.ResponseWriter, r *http.Request) {
@@ -6530,11 +6474,11 @@ func (app *App) adminVerifyAccount(w http.ResponseWriter, r *http.Request) {
 		if acc.Email == email {
 			verify := app.client.VerifyTokenDetail(r.Context(), acc.Token)
 			_ = app.accounts.MarkVerification(acc.Email, verify)
-			writeJSON(w, http.StatusOK, map[string]any{"email": email, "valid": verify.Valid, "status_code": verify.StatusCode, "error": verify.Error, "refreshed": false})
+			utils.WriteJSON(w, http.StatusOK, map[string]any{"email": email, "valid": verify.Valid, "status_code": verify.StatusCode, "error": verify.Error, "refreshed": false})
 			return
 		}
 	}
-	writeError(w, http.StatusNotFound, "Account not found")
+	utils.WriteError(w, http.StatusNotFound, "Account not found")
 }
 
 func (app *App) adminDeleteAccount(w http.ResponseWriter, r *http.Request) {
@@ -6543,13 +6487,13 @@ func (app *App) adminDeleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := app.accounts.Remove(r.PathValue("email")); err != nil {
 		if strings.Contains(err.Error(), "environment account") {
-			writeError(w, http.StatusBadRequest, "环境变量注入账号不能在面板删除，请移除对应环境变量后重启服务")
+			utils.WriteError(w, http.StatusBadRequest, "环境变量注入账号不能在面板删除，请移除对应环境变量后重启服务")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (app *App) adminGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -6561,7 +6505,7 @@ func (app *App) adminGetSettings(w http.ResponseWriter, r *http.Request) {
 	if app.keepalive != nil {
 		keepaliveStatus = app.keepalive.Status()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	utils.WriteJSON(w, http.StatusOK, map[string]any{
 		"version":                      Version,
 		"max_inflight_per_account":     app.settings.MaxInflightPerAccount,
 		"global_max_inflight":          app.accounts.Status()["global_max_inflight"],
@@ -6587,7 +6531,7 @@ func (app *App) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]any
 	if err := decodeJSON(r, &body); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON body")
+		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
 	if _, ok := body["max_inflight_per_account"]; ok {
@@ -6614,7 +6558,7 @@ func (app *App) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		app.settings.ChatIDPrewarmMaxConcurrency = max(1, intValue(body, "chat_id_pool_max_concurrency", app.settings.ChatIDPrewarmMaxConcurrency))
 	}
 	if err := app.updateKeepAliveSettings(body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		utils.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if app.chatPool != nil {
@@ -6634,7 +6578,7 @@ func (app *App) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 			modelMap = next
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (app *App) adminGetKeys(w http.ResponseWriter, r *http.Request) {
@@ -6657,7 +6601,7 @@ func (app *App) adminGetKeys(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(items, func(i, j int) bool {
 		return fmt.Sprint(items[i]["key"]) < fmt.Sprint(items[j]["key"])
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"keys": keys, "items": items})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"keys": keys, "items": items})
 }
 
 func (app *App) adminCreateKey(w http.ResponseWriter, r *http.Request) {
@@ -6671,7 +6615,7 @@ func (app *App) adminCreateKey(w http.ResponseWriter, r *http.Request) {
 	raw, _ := io.ReadAll(r.Body)
 	if len(strings.TrimSpace(string(raw))) > 0 {
 		if err := json.Unmarshal(raw, &body); err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid JSON body")
+			utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 			return
 		}
 	}
@@ -6682,11 +6626,11 @@ func (app *App) adminCreateKey(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimSpace(body.Key)
 	if mode == "custom" {
 		if key == "" {
-			writeError(w, http.StatusBadRequest, "自定义 Key 不能为空")
+			utils.WriteError(w, http.StatusBadRequest, "自定义 Key 不能为空")
 			return
 		}
 		if strings.ContainsAny(key, " \t\r\n") {
-			writeError(w, http.StatusBadRequest, "自定义 Key 不能包含空白字符")
+			utils.WriteError(w, http.StatusBadRequest, "自定义 Key 不能包含空白字符")
 			return
 		}
 	} else {
@@ -6695,13 +6639,13 @@ func (app *App) adminCreateKey(w http.ResponseWriter, r *http.Request) {
 		key = "sk-" + hex.EncodeToString(buf)
 	}
 	if app.apiKeys[key] {
-		writeError(w, http.StatusConflict, "API Key 已存在")
+		utils.WriteError(w, http.StatusConflict, "API Key 已存在")
 		return
 	}
 	app.apiKeys[key] = true
 	app.managedAPIKeys[key] = true
 	_ = saveAPIKeys(app.settings.APIKeysFile, app.managedAPIKeys)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "key": key})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "key": key})
 }
 
 func (app *App) adminDeleteKey(w http.ResponseWriter, r *http.Request) {
@@ -6710,13 +6654,13 @@ func (app *App) adminDeleteKey(w http.ResponseWriter, r *http.Request) {
 	}
 	key := r.PathValue("key")
 	if app.envAPIKeys[key] {
-		writeError(w, http.StatusBadRequest, "环境变量注入 Key 不能在面板删除，请移除对应环境变量后重启服务")
+		utils.WriteError(w, http.StatusBadRequest, "环境变量注入 Key 不能在面板删除，请移除对应环境变量后重启服务")
 		return
 	}
 	delete(app.apiKeys, key)
 	delete(app.managedAPIKeys, key)
 	_ = saveAPIKeys(app.settings.APIKeysFile, app.managedAPIKeys)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (app *App) adminGetCaptures(w http.ResponseWriter, r *http.Request) {
@@ -6725,10 +6669,10 @@ func (app *App) adminGetCaptures(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := app.capturesStore.LoadAny()
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		utils.WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, data)
+	utils.WriteJSON(w, http.StatusOK, data)
 }
 
 func (app *App) adminDeleteCaptures(w http.ResponseWriter, r *http.Request) {
@@ -6736,7 +6680,7 @@ func (app *App) adminDeleteCaptures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = app.capturesStore.Save([]any{})
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	utils.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // ---- migrated from models.go ----
@@ -8451,7 +8395,7 @@ func (app *App) withRequestLogging(next http.Handler) http.Handler {
 					"panic", recovered,
 					"stack", string(debug.Stack()),
 				)
-				writeError(recorder, http.StatusInternalServerError, "internal server error")
+				utils.WriteError(recorder, http.StatusInternalServerError, "internal server error")
 			}
 			status := recorder.status
 			if status == 0 {
@@ -8692,14 +8636,14 @@ func (s *JSONStore) Ensure() error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return writeJSONFileLocked(s.path, s.defaultData)
+	return utils.WriteJSONFileLocked(s.path, s.defaultData)
 }
 
 func (s *JSONStore) LoadInto(v any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, err := os.Stat(s.path); errors.Is(err, os.ErrNotExist) {
-		if err := writeJSONFileLocked(s.path, s.defaultData); err != nil {
+		if err := utils.WriteJSONFileLocked(s.path, s.defaultData); err != nil {
 			return err
 		}
 	}
@@ -8724,26 +8668,11 @@ func (s *JSONStore) LoadAny() (any, error) {
 func (s *JSONStore) Save(v any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return writeJSONFileLocked(s.path, v)
+	return utils.WriteJSONFileLocked(s.path, v)
 }
 
 func writeJSONFile(path string, v any) error {
-	return writeJSONFileLocked(path, v)
-}
-
-func writeJSONFileLocked(path string, v any) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	raw, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return utils.WriteJSONFileLocked(path, v)
 }
 
 // ---- migrated from tool_parser.go ----
@@ -8899,15 +8828,9 @@ func randomID() string {
 	return hex.EncodeToString(buf)
 }
 
-func writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(payload)
-}
-
-func writeError(w http.ResponseWriter, status int, detail any) {
-	writeJSON(w, status, map[string]any{"detail": sanitizeClientErrorDetail(detail)})
-}
+// func writeError(w http.ResponseWriter, status int, detail any) {
+// 	utils.WriteJSON(w, status, map[string]any{"detail": sanitizeClientErrorDetail(detail)})
+// }
 
 func decodeJSON(r *http.Request, dst any) error {
 	defer r.Body.Close()
