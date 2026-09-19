@@ -1832,7 +1832,7 @@ func LoadSettings() Settings {
 	settings := Settings{
 		Port:                                   envInt("PORT", 7860),
 		Workers:                                envInt("WORKERS", 1),
-		AdminKey:                               envString("ADMIN_KEY", ""),
+		AdminKey:                               envString("ADMIN_KEY", "xxx"),
 		BrowserPoolSize:                        envInt("BROWSER_POOL_SIZE", 1),
 		MaxInflightPerAccount:                  envIntAlias("MAX_INFLIGHT_PER_ACCOUNT", "MAX_INFLIGHT", 2),
 		BrowserStreamTimeoutSeconds:            envInt("BROWSER_STREAM_TIMEOUT_SECONDS", 1800),
@@ -4617,7 +4617,7 @@ func (app *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, map[string]any{"error": map[string]any{"message": "Invalid JSON body", "type": "invalid_request_error"}})
 		return
 	}
@@ -4853,7 +4853,7 @@ func (app *App) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -4908,7 +4908,7 @@ func (app *App) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -5343,7 +5343,7 @@ func (app *App) handleAnthropicCountTokens(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var body map[string]any
-	_ = decodeJSON(r, &body)
+	_ = utils.DecodeJSON(r, &body)
 	prompt := anthropicPrompt(body)
 	utils.WriteJSON(w, http.StatusOK, map[string]any{"input_tokens": len(prompt)})
 }
@@ -5354,7 +5354,7 @@ func (app *App) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -5550,7 +5550,7 @@ func (app *App) handleGeminiGenerate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -5570,7 +5570,7 @@ func (app *App) handleGeminiStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -5718,7 +5718,7 @@ func (app *App) handleImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -5852,7 +5852,7 @@ func (app *App) handleVideos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -6327,7 +6327,7 @@ func (app *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -6363,7 +6363,7 @@ func (app *App) adminAddAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -6530,7 +6530,7 @@ func (app *App) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if err := decodeJSON(r, &body); err != nil {
+	if err := utils.DecodeJSON(r, &body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
@@ -8832,12 +8832,12 @@ func randomID() string {
 // 	utils.WriteJSON(w, status, map[string]any{"detail": sanitizeClientErrorDetail(detail)})
 // }
 
-func decodeJSON(r *http.Request, dst any) error {
-	defer r.Body.Close()
-	dec := json.NewDecoder(io.LimitReader(r.Body, 256<<20))
-	dec.UseNumber()
-	return dec.Decode(dst)
-}
+// func utils.DecodeJSON(r *http.Request, dst any) error {
+// 	defer r.Body.Close()
+// 	dec := json.NewDecoder(io.LimitReader(r.Body, 256<<20))
+// 	dec.UseNumber()
+// 	return dec.Decode(dst)
+// }
 
 func stringValue(m map[string]any, key, fallback string) string {
 	if m == nil {
