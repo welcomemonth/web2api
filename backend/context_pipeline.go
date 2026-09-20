@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"qwen2api-go/utils"
 	"regexp"
 	"sort"
 	"strings"
@@ -394,25 +395,25 @@ func injectWorkspaceNotice(payload map[string]any, workspaceRoot string) map[str
 			return payload
 		}
 	}
-	rewritten := deepCopyMap(payload)
+	rewritten := utils.DeepCopyMap(payload)
 	prefixed := []any{map[string]any{"role": "system", "content": notice}}
 	prefixed = append(prefixed, anyList(rewritten["messages"])...)
 	rewritten["messages"] = prefixed
 	return rewritten
 }
 
-func deepCopyMap(src map[string]any) map[string]any {
-	if src == nil {
-		return map[string]any{}
-	}
-	raw, _ := json.Marshal(src)
-	var dst map[string]any
-	_ = json.Unmarshal(raw, &dst)
-	if dst == nil {
-		dst = map[string]any{}
-	}
-	return dst
-}
+// func deepCopyMap(src map[string]any) map[string]any {
+// 	if src == nil {
+// 		return map[string]any{}
+// 	}
+// 	raw, _ := json.Marshal(src)
+// 	var dst map[string]any
+// 	_ = json.Unmarshal(raw, &dst)
+// 	if dst == nil {
+// 		dst = map[string]any{}
+// 	}
+// 	return dst
+// }
 
 func flattenContentText(content any) string {
 	switch v := content.(type) {
@@ -636,7 +637,7 @@ func extractInlineFilePayload(block map[string]any) (string, string, []byte, boo
 }
 
 func (app *App) preprocessAttachments(payload map[string]any, ownerToken string) (PreprocessedAttachments, error) {
-	rewritten := deepCopyMap(payload)
+	rewritten := utils.DeepCopyMap(payload)
 	out := PreprocessedAttachments{Payload: rewritten}
 	for msgIndex, rawMsg := range anyList(rewritten["messages"]) {
 		msg, ok := rawMsg.(map[string]any)
@@ -1229,7 +1230,7 @@ func (app *App) prepareContextAttachments(ctx context.Context, payload map[strin
 		if err := uploadOne(local, attachment.Filename); err != nil {
 			app.accounts.Release(acc)
 			cleanupAndRelease()
-			fallback := deepCopyMap(payload)
+			fallback := utils.DeepCopyMap(payload)
 			names := []string{}
 			for _, item := range attachments {
 				if item.Filename != "" {
@@ -1293,7 +1294,7 @@ func (app *App) prepareContextAttachments(ctx context.Context, payload map[strin
 		cleanupAndRelease()
 		return PreparedRequestContext{}, err
 	}
-	rewritten := deepCopyMap(payload)
+	rewritten := utils.DeepCopyMap(payload)
 	if useGeneratedContextFiles {
 		rewritten["messages"] = plan.InlineMessages
 	}
@@ -1330,7 +1331,7 @@ func (app *App) rewriteCachedFileHints(payload map[string]any, authToken string)
 	if app == nil || app.fileContentCache == nil || strings.TrimSpace(authToken) == "" {
 		return payload
 	}
-	rewritten := deepCopyMap(payload)
+	rewritten := utils.DeepCopyMap(payload)
 	refs := collectToolCallRefs(anyList(rewritten["messages"]))
 	messages := anyList(rewritten["messages"])
 	changed := false
