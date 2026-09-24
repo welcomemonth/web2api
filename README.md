@@ -1,28 +1,28 @@
 [English](README.md) | [简体中文](README_CN.md)
 
 <div align="center">
-  <a href="https://github.com/YuJunZhiXue/qwen2API">
-    <img src="https://img.shields.io/badge/Qwen-2API-1677ff?style=for-the-badge&logo=alibabacloud&logoColor=white" alt="qwen2API" height="80">
+  <a href="https://github.com/welcomemonth/web2api">
+    <img src="https://img.shields.io/badge/Web-2API-1677ff?style=for-the-badge&logo=alibabacloud&logoColor=white" alt="Web2API" height="80">
   </a>
 
-  <h1>qwen2API</h1>
+  <h1>Web2API</h1>
 
   <p>
     Self-hosted Qwen Web protocol gateway with OpenAI, Anthropic, and Gemini compatible APIs.
   </p>
 
   <p>
-    <a href="https://github.com/YuJunZhiXue/qwen2API">GitHub</a> ·
+    <a href="https://github.com/welcomemonth/web2api">GitHub</a> ·
     <a href="https://hub.docker.com/r/yujunzhixue/qwen2api">Docker Hub</a> ·
     <a href="https://t.me/qwen2api">Telegram</a> ·
     <a href="./README_CN.md">中文说明</a>
   </p>
 
   <p>
-    <a href="https://github.com/YuJunZhiXue/qwen2API/releases">
+    <a href="https://github.com/welcomemonth/web2api/releases">
       <img src="https://img.shields.io/github/v/release/YuJunZhiXue/qwen2API?logo=github&label=Version&style=flat-square" alt="Release">
     </a>
-    <a href="https://github.com/YuJunZhiXue/qwen2API/stargazers">
+    <a href="https://github.com/welcomemonth/web2api/stargazers">
       <img src="https://img.shields.io/github/stars/YuJunZhiXue/qwen2API?logo=github&style=flat-square&label=Stars" alt="Stars">
     </a>
     <a href="https://hub.docker.com/r/yujunzhixue/qwen2api">
@@ -126,7 +126,7 @@ Open:
 Use this path when you changed the source code and need to build your own image.
 
 ```bash
-git clone https://github.com/YuJunZhiXue/qwen2API.git
+git clone https://github.com/welcomemonth/web2api.git
 cd qwen2API
 cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml build
@@ -249,9 +249,9 @@ npm run build
 
 ### 1. How to Contribute
 
-- Report bugs through [GitHub Issues](https://github.com/YuJunZhiXue/qwen2API/issues).
-- Submit feature requests through [GitHub Issues](https://github.com/YuJunZhiXue/qwen2API/issues).
-- Open focused pull requests through [GitHub Pull Requests](https://github.com/YuJunZhiXue/qwen2API/pulls).
+- Report bugs through [GitHub Issues](https://github.com/welcomemonth/web2api/issues).
+- Submit feature requests through [GitHub Issues](https://github.com/welcomemonth/web2api/issues).
+- Open focused pull requests through [GitHub Pull Requests](https://github.com/welcomemonth/web2api/pulls).
 - Include practical verification steps when possible.
 
 ### 2. Pull Request Checklist
@@ -265,7 +265,7 @@ npm run build
 
 Thanks to everyone who helps improve qwen2API.
 
-[![Contributors](https://contrib.rocks/image?repo=YuJunZhiXue/qwen2API)](https://github.com/YuJunZhiXue/qwen2API/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=YuJunZhiXue/qwen2API)](https://github.com/welcomemonth/web2api/graphs/contributors)
 
 ## 六、其他信息 / Other Information
 
