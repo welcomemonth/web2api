@@ -34,10 +34,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/playwright-community/playwright-go"
 	pw "github.com/playwright-community/playwright-go"
 
 	"qwen2api-go/adapter"
 	apidesc "qwen2api-go/api"
+	"qwen2api-go/browser"
 	"qwen2api-go/core"
 	rt "qwen2api-go/runtime"
 	"qwen2api-go/services"
@@ -57,6 +59,7 @@ type App struct {
 	managedAPIKeys map[string]bool
 	envAPIKeys     map[string]bool
 
+	browser           *browser.BrowserManager
 	usersStore        *JSONStore
 	accountsStore     *JSONStore
 	capturesStore     *JSONStore
@@ -168,7 +171,16 @@ func NewApp(settings Settings, logger *slog.Logger) (*App, error) {
 	if err := app.accounts.Load(); err != nil {
 		return nil, err
 	}
-	app.client = NewQwenClient(app.accounts, settings, logger)
+	browser, err := browser.NewBrowserManager("ws://localhost:9222/camoufox")
+	if err != nil {
+		return nil, err
+	}
+	app.browser = browser // TODO 没有关闭这个内容
+	// 初始化客户端
+
+	// ======================
+
+	app.client = NewQwenClient(app.accounts, settings, app.browser.Context(), logger)
 	app.chatPool = NewChatIDPool(app.client, app.accounts, settings, logger)
 	app.keepalive = NewKeepAliveService(logger)
 	return app, nil
@@ -7766,12 +7778,13 @@ func latestHumanLineLen(prompt string) int {
 const qwenBaseURL = "https://chat.qwen.ai"
 
 type QwenClient struct {
-	pool     *AccountPool
-	settings Settings
-	logger   *slog.Logger
-	http     *http.Client
-	mu       sync.Mutex
-	deleted  map[string]bool
+	pool           *AccountPool
+	settings       Settings
+	logger         *slog.Logger
+	http           *http.Client
+	mu             sync.Mutex
+	browserContext pw.BrowserContext
+	deleted        map[string]bool
 }
 
 type UpstreamEvent struct {
@@ -7818,9 +7831,9 @@ type TokenVerifyResult struct {
 	Error      string
 }
 
-func NewQwenClient(pool *AccountPool, settings Settings, logger *slog.Logger) *QwenClient {
+func NewQwenClient(pool *AccountPool, settings Settings, browserCtx pw.BrowserContext, logger *slog.Logger) *QwenClient {
 	return &QwenClient{
-		pool: pool, settings: settings, logger: logger,
+		pool: pool, settings: settings, logger: logger, browserContext: browserCtx,
 		http: &http.Client{
 			Transport: &http.Transport{
 				Proxy: http.ProxyFromEnvironment, MaxIdleConns: 100, MaxIdleConnsPerHost: 20,
@@ -7970,6 +7983,126 @@ func (c *QwenClient) DeleteChat(ctx context.Context, token, chatID string) bool 
 }
 
 func (c *QwenClient) StreamChat(ctx context.Context, token, chatID string, payload map[string]any, onEvent func(UpstreamEvent) error) error {
+	// 启动页面 读取已有的cookie和token
+	if c.browserContext == nil {
+		return fmt.Errorf("未能成功初始化浏览器")
+	}
+	page, err := c.browserContext.NewPage()
+	if err != nil {
+		return err
+	}
+	defer page.Close()
+
+	// 1. 创建 channel 用于接收 Console 传递过来的流数据
+	consoleChan := make(chan string, 10)
+
+	// 2. 监听 Console，将匹配的数据发送到 channel (Playwright 的回调是异步的)
+	page.OnConsole(func(msg playwright.ConsoleMessage) {
+		text := msg.Text()
+		// 识别我们自定义的前缀
+		if strings.HasPrefix(text, "[QWEN-SSE-CHUNK]") {
+			// 剥离标记，拿到真正的实时打字机流数据包
+			rawChunk := strings.TrimPrefix(text, "[QWEN-SSE-CHUNK] ")
+			select {
+			case consoleChan <- rawChunk:
+			case <-ctx.Done():
+				// 如果外部已经取消，不要再阻塞发送
+			}
+		}
+	})
+
+	if _, err = page.Goto("https://chat.qwen.ai", pw.PageGotoOptions{
+		WaitUntil: pw.WaitUntilStateDomcontentloaded,
+	}); err != nil {
+		return fmt.Errorf("打开页面失败：%v", err)
+	}
+
+	// 使用token直接登陆，使用头像检测是否成功登陆
+	userProfilelocator := page.Locator(`img[alt="User profile"]`)
+	// 等待两分钟，没有出现这个locator或者超过两分钟则标记失败
+	timeout := 120000.0 // 2分钟
+	err = userProfilelocator.WaitFor(pw.LocatorWaitForOptions{
+		Timeout: &timeout,
+	})
+	if err != nil {
+		return fmt.Errorf("获取用户头像组件失败：%v \n", err)
+	}
+	inputBox := page.GetByPlaceholder("询问 Qwen")
+	err = inputBox.Fill("你好，给我讲个笑话") // FIXME 没有将实际的prompt传递过来
+	if err != nil {
+		// TODO 换第二种办法写入
+		return fmt.Errorf("填充输入框失败：%v", err)
+	}
+	time.Sleep(2000)
+	err = inputBox.Press("Enter")
+	if err != nil {
+		// TODO 换第二种办法尝试直接发送
+		return fmt.Errorf("发送消息失败：%v", err)
+	}
+
+	// ================== 处理得到的流数据 ===============
+	// 4. 核心流处理循环 (模仿 StreamChat 的 select 结构)
+	events := 0
+	var isFinished bool
+	// 设置一个总的超时时间，防止页面一直不返回或死循环 (例如 3 分钟)
+	overallTimeout := time.NewTimer(3 * time.Minute)
+	defer overallTimeout.Stop()
+
+	// 【新增】包装原有的 onEvent，拦截 status == "finished" 的事件
+	wrappedOnEvent := func(evt UpstreamEvent) error {
+		// 注意：这里假设 UpstreamEvent 结构体直接有 Status 字段。
+		// 如果你的结构体是嵌套的（比如 evt.Choices[0].Delta.Status），请自行调整。
+		if evt.Status == "finished" && evt.Phase == "answer" {
+			isFinished = true
+		}
+		// 无论是否结束，都继续执行用户原本传入的回调，保证数据不丢失
+		return onEvent(evt)
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-overallTimeout.C:
+			return fmt.Errorf("StreamWebChat 总统执行超时")
+		case chunk, ok := <-consoleChan:
+			if !ok {
+				return nil
+			}
+			blocks := strings.Split(chunk, "\n\n")
+			for _, block := range blocks {
+				// 3. 过滤掉切割后产生的空字符串（例如末尾的 \n\n 会产生一个空元素）
+				if strings.TrimSpace(block) == "" {
+					continue
+				}
+
+				// 4. 解析并触发回调
+				// 注意：这里直接传入 block，如果你的 parseSSEBlock 严格要求末尾有换行，
+				// 可以改成 block + "\n\n"，但通常标准的按行解析器不需要。
+				if err := c.parseAndTrigger(block, wrappedOnEvent, &events); err != nil {
+					return err
+				}
+				// 【新增】每次解析完一个块后，检查是否触发了 finished
+				if isFinished {
+					return nil // 收到结束信号，直接 return nil 优雅退出
+				}
+			}
+		}
+	}
+}
+
+func (c *QwenClient) parseAndTrigger(blockText string, onEvent func(UpstreamEvent) error, events *int) error {
+	// 如果你有 upstream.ExtractUpstreamError，可以在这里调用检查错误
+
+	// 假设 parseSSEBlock 是你项目中已有的函数
+	// 如果没有，你需要自己实现一个简单的解析：按行分割，提取 "data: " 后面的 JSON
+	return parseSSEBlock(blockText, func(evt UpstreamEvent) error {
+		*events++
+		// 触发你最初传入的回调
+		return onEvent(evt)
+	})
+}
+
+func (c *QwenClient) StreamWebChat(ctx context.Context, token, chatID string, payload map[string]any, onEvent func(UpstreamEvent) error) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
