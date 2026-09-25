@@ -12,11 +12,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"html"
 	"io"
 	"log/slog"
-	"math"
 	mathrand "math/rand"
 	"mime"
 	"net"
@@ -41,6 +39,7 @@ import (
 	apidesc "qwen2api-go/api"
 	"qwen2api-go/browser"
 	"qwen2api-go/core"
+	"qwen2api-go/pkg/logger"
 	rt "qwen2api-go/runtime"
 	"qwen2api-go/services"
 	"qwen2api-go/toolcall"
@@ -73,7 +72,7 @@ type App struct {
 
 func main() {
 	settings := LoadSettings()
-	logger := newLogger(settings.LogLevel)
+	logger := logger.NewLogger(settings.LogLevel)
 	if strings.TrimSpace(settings.AdminKey) == "" {
 		logger.Warn("ADMIN_KEY is not set; configure it before using WebUI or admin APIs")
 	}
@@ -206,19 +205,6 @@ func (app *App) StartBackground(ctx context.Context) {
 			}
 		}
 	}()
-}
-
-func newLogger(levelText string) *slog.Logger {
-	level := slog.LevelInfo
-	switch normalizeLower(levelText) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn", "warning":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	}
-	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }
 
 func repoRootFromCwd() string {
@@ -980,7 +966,7 @@ func (m *MailSession) setAuth(auth map[string]any) {
 	if auth == nil {
 		return
 	}
-	if token := strings.TrimSpace(anyString(auth["token"], "")); token != "" {
+	if token := strings.TrimSpace(utils.AnyString(auth["token"], "")); token != "" {
 		m.token = token
 	}
 	switch v := auth["expires_at"].(type) {
@@ -1055,7 +1041,7 @@ func (m *MailSession) fetchVerifyLink(ctx context.Context, email string) string 
 		return ""
 	}
 	root, _ := data["data"].(map[string]any)
-	for _, raw := range anyList(root["emails"]) {
+	for _, raw := range utils.AnyList(root["emails"]) {
 		msg, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -1095,10 +1081,10 @@ func (m *MailSession) mailRequest(ctx context.Context, method, path string, body
 }
 
 func extractVerifyLinkFromEmailRecord(msg map[string]any) string {
-	subject := strings.ToLower(anyString(msg["subject"], ""))
+	subject := strings.ToLower(utils.AnyString(msg["subject"], ""))
 	parts := []string{}
 	for _, field := range []string{"html_content", "content", "body", "html", "text", "raw"} {
-		if value := anyString(msg[field], ""); value != "" {
+		if value := utils.AnyString(msg[field], ""); value != "" {
 			parts = append(parts, value)
 		}
 	}
@@ -1106,7 +1092,7 @@ func extractVerifyLinkFromEmailRecord(msg map[string]any) string {
 		switch v := msg[field].(type) {
 		case map[string]any:
 			for _, inner := range v {
-				if s := anyString(inner, ""); s != "" {
+				if s := utils.AnyString(inner, ""); s != "" {
 					parts = append(parts, s)
 				}
 			}
@@ -1352,7 +1338,7 @@ func localStorageToken(page pw.Page) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(anyString(raw, ""))
+	return strings.TrimSpace(utils.AnyString(raw, ""))
 }
 
 func qwenCookieString(page pw.Page) string {
@@ -1418,7 +1404,7 @@ func extractVerifyLinkFromPage(page pw.Page) string {
 	if iframe, err := page.QuerySelector("#emailFrame"); err == nil && iframe != nil {
 		if frame, err := iframe.ContentFrame(); err == nil && frame != nil {
 			if raw, err := frame.Evaluate(js); err == nil {
-				if link := strings.TrimSpace(anyString(raw, "")); link != "" {
+				if link := strings.TrimSpace(utils.AnyString(raw, "")); link != "" {
 					return link
 				}
 			}
@@ -1428,7 +1414,7 @@ func extractVerifyLinkFromPage(page pw.Page) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(anyString(raw, ""))
+	return strings.TrimSpace(utils.AnyString(raw, ""))
 }
 
 func sleepWithContext(ctx context.Context, delay time.Duration) {
@@ -2162,7 +2148,7 @@ func envFloat(key string, fallback float64) float64 {
 
 func envBool(key string, fallback bool) bool {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		switch normalizeLower(v) {
+		switch utils.NormalizeLower(v) {
 		case "1", "true", "yes", "on":
 			return true
 		case "0", "false", "no", "off":
@@ -2335,10 +2321,10 @@ func (app *App) keepaliveConfig() KeepAliveConfig {
 		_ = app.configStore.LoadInto(&data)
 	}
 	if cfg.URL == "" && data != nil {
-		cfg.URL = stringValue(data, "keepalive_url", "")
+		cfg.URL = utils.StringValue(data, "keepalive_url", "")
 	}
 	if data != nil {
-		cfg.Interval = clampInt(intValue(data, "keepalive_interval", cfg.Interval), keepAliveMinInterval, keepAliveMaxInterval)
+		cfg.Interval = clampInt(utils.IntValue(data, "keepalive_interval", cfg.Interval), keepAliveMinInterval, keepAliveMaxInterval)
 	}
 	locked := []string{}
 	if v, ok := os.LookupEnv("KEEPALIVE_URL"); ok {
@@ -2370,10 +2356,10 @@ func (app *App) updateKeepAliveSettings(body map[string]any) error {
 		locked[key] = true
 	}
 	if _, ok := body["keepalive_url"]; ok && !locked["keepalive_url"] {
-		data["keepalive_url"] = stringValue(body, "keepalive_url", "")
+		data["keepalive_url"] = utils.StringValue(body, "keepalive_url", "")
 	}
 	if _, ok := body["keepalive_interval"]; ok && !locked["keepalive_interval"] {
-		interval := intValue(body, "keepalive_interval", keepAliveDefaultInterval)
+		interval := utils.IntValue(body, "keepalive_interval", keepAliveDefaultInterval)
 		if interval < keepAliveMinInterval || interval > keepAliveMaxInterval {
 			return fmt.Errorf("保活间隔必须在 %d - %d 秒之间", keepAliveMinInterval, keepAliveMaxInterval)
 		}
@@ -2527,7 +2513,7 @@ func (app *App) resolveAuth(w http.ResponseWriter, r *http.Request) (*AuthContex
 	_ = app.usersStore.LoadInto(&users)
 	var user map[string]any
 	for _, candidate := range users {
-		if stringValue(candidate, "id", "") == token {
+		if utils.StringValue(candidate, "id", "") == token {
 			user = candidate
 			break
 		}
@@ -2537,8 +2523,8 @@ func (app *App) resolveAuth(w http.ResponseWriter, r *http.Request) (*AuthContex
 		return nil, false
 	}
 	if user != nil {
-		quota := intValue(user, "quota", 0)
-		used := intValue(user, "used_tokens", 0)
+		quota := utils.IntValue(user, "quota", 0)
+		used := utils.IntValue(user, "used_tokens", 0)
 		if quota > 0 && used >= quota {
 			utils.WriteError(w, http.StatusPaymentRequired, "Quota Exceeded")
 			return nil, false
@@ -3703,14 +3689,14 @@ func formatToolSignatureForPrompt(signature string) string {
 	}
 	parts := strings.SplitN(signature, "\x00", 2)
 	if len(parts) != 2 {
-		return truncate(signature, 400)
+		return utils.Truncate(signature, 400)
 	}
 	tool := strings.TrimSpace(parts[0])
 	args := strings.TrimSpace(parts[1])
 	if args == "" {
 		args = "{}"
 	}
-	return "tool=" + firstNonEmpty(tool, "unknown") + " args=" + truncate(args, 360)
+	return "tool=" + firstNonEmpty(tool, "unknown") + " args=" + utils.Truncate(args, 360)
 }
 
 func normalizeToolSignatureArgs(args string) string {
@@ -4021,7 +4007,7 @@ func (app *App) recoverInvalidToolCallArgs(ctx context.Context, acc *Account, re
 				app.logWarn(ctx, "[Retry] invalid tool arguments repeated same invalid call; stopping recovery",
 					"attempt", attempt,
 					"tool", invalidToolArgsName(retryResult),
-					"fingerprint", truncate(fingerprint, 160),
+					"fingerprint", utils.Truncate(fingerprint, 160),
 				)
 				working = retryResult
 				break
@@ -4392,13 +4378,13 @@ func (app *App) classifyAccountErrorFor(acc *Account, err error, usage string) {
 		usage = normalizeAccountUsage(usage)
 		app.accounts.MarkRateLimitedFor(acc, usage, app.accountErrorCooldown(lower), msg)
 		if app.logger != nil {
-			app.logger.Warn("账号进入分用途限额冷却", "account", acc.Email, "usage", usage, "reason", rateLimitReasonForUsage(usage), "error", truncate(msg, 240))
+			app.logger.Warn("账号进入分用途限额冷却", "account", acc.Email, "usage", usage, "reason", rateLimitReasonForUsage(usage), "error", utils.Truncate(msg, 240))
 		}
 		return
 	}
 	if isModelNotFoundErrorMessage(lower) {
 		if app.logger != nil {
-			app.logger.Warn("上游模型不可用，未标记账号失效", "account", acc.Email, "error", truncate(msg, 240))
+			app.logger.Warn("上游模型不可用，未标记账号失效", "account", acc.Email, "error", utils.Truncate(msg, 240))
 		}
 		return
 	}
@@ -4407,14 +4393,14 @@ func (app *App) classifyAccountErrorFor(acc *Account, err error, usage string) {
 		cooldown := transientUpstreamCooldownSeconds(app.settings)
 		app.accounts.MarkRateLimitedFor(acc, usage, cooldown, msg)
 		if app.logger != nil {
-			app.logger.Warn("账号进入临时上游异常冷却", "account", acc.Email, "usage", usage, "cooldown_seconds", cooldown, "error", truncate(msg, 240))
+			app.logger.Warn("账号进入临时上游异常冷却", "account", acc.Email, "usage", usage, "cooldown_seconds", cooldown, "error", utils.Truncate(msg, 240))
 		}
 		return
 	}
 	if isAuthErrorMessage(lower) {
 		app.accounts.MarkInvalid(acc, "auth_error", msg)
 		if app.logger != nil {
-			app.logger.Warn("账号认证失败，已标记不可用", "account", acc.Email, "error", truncate(msg, 240))
+			app.logger.Warn("账号认证失败，已标记不可用", "account", acc.Email, "error", utils.Truncate(msg, 240))
 		}
 	}
 }
@@ -4639,7 +4625,7 @@ func (app *App) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.recordStandardRequest(r.Context(), req)
-	id := "chatcmpl-" + randomID()[:12]
+	id := "chatcmpl-" + utils.RandomID()[:12]
 	created := time.Now().Unix()
 	if req.Stream {
 		app.streamOpenAI(w, r, req, id, created)
@@ -4869,7 +4855,7 @@ func (app *App) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	model := stringValue(body, "model", "text-embedding-ada-002")
+	model := utils.StringValue(body, "model", "text-embedding-ada-002")
 	input := body["input"]
 	inputs := []string{}
 	switch v := input.(type) {
@@ -4886,7 +4872,7 @@ func (app *App) handleEmbeddings(w http.ResponseWriter, r *http.Request) {
 	total := 0
 	for i, text := range inputs {
 		total += len(text)
-		data = append(data, map[string]any{"object": "embedding", "embedding": pseudoEmbedding(text), "index": i})
+		data = append(data, map[string]any{"object": "embedding", "embedding": utils.PseudoEmbedding(text), "index": i})
 	}
 	app.addUsedTokens(auth.Token, total)
 	utils.WriteJSON(w, http.StatusOK, map[string]any{
@@ -4906,8 +4892,8 @@ func (app *App) addUsedTokens(token string, delta int) {
 		return
 	}
 	for _, user := range users {
-		if stringValue(user, "id", "") == token {
-			user["used_tokens"] = intValue(user, "used_tokens", 0) + delta
+		if utils.StringValue(user, "id", "") == token {
+			user["used_tokens"] = utils.IntValue(user, "used_tokens", 0) + delta
 			break
 		}
 	}
@@ -4931,7 +4917,7 @@ func (app *App) handleResponses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	app.recordStandardRequest(r.Context(), req)
-	id := "resp_" + randomID()[:24]
+	id := "resp_" + utils.RandomID()[:24]
 	if req.Stream {
 		app.streamResponses(w, r, req, id)
 		return
@@ -4955,7 +4941,7 @@ func (app *App) handleResponses(w http.ResponseWriter, r *http.Request) {
 			content = append([]map[string]any{{"type": "reasoning_text", "text": result.ReasoningText}}, content...)
 		}
 		output = append(output, map[string]any{
-			"id": "msg_" + randomID()[:12], "type": "message", "status": "completed", "role": "assistant",
+			"id": "msg_" + utils.RandomID()[:12], "type": "message", "status": "completed", "role": "assistant",
 			"content": content,
 		})
 	}
@@ -4977,14 +4963,14 @@ func responsesToChatBody(body map[string]any) map[string]any {
 		messages = append(messages, responsesInputMessages(input)...)
 	}
 	if len(messages) == 0 {
-		messages = anyList(body["messages"])
+		messages = utils.AnyList(body["messages"])
 	}
 	if len(messages) == 0 {
 		messages = append(messages, map[string]any{"role": "user", "content": ""})
 	}
 	out := map[string]any{
 		"model": body["model"], "messages": messages, "stream": body["stream"],
-		"tools":           normalizeResponsesTools(anyList(body["tools"])),
+		"tools":           normalizeResponsesTools(utils.AnyList(body["tools"])),
 		"enable_thinking": body["enable_thinking"],
 	}
 	for _, key := range []string{"session_key", "conversation_id", "_workspace_root", "upstream_files", "store"} {
@@ -5009,7 +4995,7 @@ func responsesInputMessages(input any) []any {
 			case string:
 				out = append(out, map[string]any{"role": "user", "content": x})
 			case map[string]any:
-				itemType := stringValue(x, "type", "")
+				itemType := utils.StringValue(x, "type", "")
 				if itemType == "message" || x["role"] != nil {
 					out = append(out, convertResponseMessage(x))
 					continue
@@ -5039,7 +5025,7 @@ var (
 )
 
 func convertResponseMessage(item map[string]any) map[string]any {
-	role := stringValue(item, "role", "user")
+	role := utils.StringValue(item, "role", "user")
 	if role == "developer" {
 		role = "system"
 	}
@@ -5054,7 +5040,7 @@ func convertResponseMessage(item map[string]any) map[string]any {
 	if calls, ok := item["tool_calls"].([]any); ok {
 		msg["tool_calls"] = calls
 	}
-	if id := stringValue(item, "tool_call_id", ""); id != "" {
+	if id := utils.StringValue(item, "tool_call_id", ""); id != "" {
 		msg["tool_call_id"] = id
 	}
 	return msg
@@ -5072,8 +5058,8 @@ func convertResponseMessageContent(content any, role string) any {
 		hasNonText := false
 		for _, part := range v {
 			c := convertResponseContentPart(part, role)
-			if m, ok := c.(map[string]any); ok && stringValue(m, "type", "") == "text" {
-				if text := stringValue(m, "text", ""); text != "" {
+			if m, ok := c.(map[string]any); ok && utils.StringValue(m, "type", "") == "text" {
+				if text := utils.StringValue(m, "text", ""); text != "" {
 					textParts = append(textParts, text)
 				}
 			} else {
@@ -5087,8 +5073,8 @@ func convertResponseMessageContent(content any, role string) any {
 		return strings.Join(textParts, "\n")
 	case map[string]any:
 		c := convertResponseContentPart(v, role)
-		if m, ok := c.(map[string]any); ok && stringValue(m, "type", "") == "text" {
-			return stringValue(m, "text", "")
+		if m, ok := c.(map[string]any); ok && utils.StringValue(m, "type", "") == "text" {
+			return utils.StringValue(m, "text", "")
 		}
 		return []any{c}
 	default:
@@ -5101,15 +5087,15 @@ func convertResponseContentPart(part any, role string) any {
 	case string:
 		return map[string]any{"type": "text", "text": v}
 	case map[string]any:
-		partType := stringValue(v, "type", "")
+		partType := utils.StringValue(v, "type", "")
 		switch partType {
 		case "input_text", "output_text", "text":
-			return map[string]any{"type": "text", "text": stringValue(v, "text", "")}
+			return map[string]any{"type": "text", "text": utils.StringValue(v, "text", "")}
 		case "input_image", "image_url":
 			if imageURL, ok := v["image_url"].(map[string]any); ok {
 				return map[string]any{"type": "image_url", "image_url": imageURL}
 			}
-			if imageURL := stringValue(v, "image_url", ""); imageURL != "" {
+			if imageURL := utils.StringValue(v, "image_url", ""); imageURL != "" {
 				return map[string]any{"type": "image_url", "image_url": map[string]any{"url": imageURL}}
 			}
 			return v
@@ -5128,11 +5114,11 @@ func convertResponseContentPart(part any, role string) any {
 		case "refusal":
 			return map[string]any{"type": "text", "text": firstString(v["refusal"], v["text"])}
 		}
-		if role == "assistant" && stringValue(v, "text", "") != "" {
-			return map[string]any{"type": "text", "text": stringValue(v, "text", "")}
+		if role == "assistant" && utils.StringValue(v, "text", "") != "" {
+			return map[string]any{"type": "text", "text": utils.StringValue(v, "text", "")}
 		}
-		if stringValue(v, "content", "") != "" {
-			return map[string]any{"type": "text", "text": stringValue(v, "content", "")}
+		if utils.StringValue(v, "content", "") != "" {
+			return map[string]any{"type": "text", "text": utils.StringValue(v, "content", "")}
 		}
 		return map[string]any{"type": "text", "text": mustJSON(v)}
 	default:
@@ -5141,7 +5127,7 @@ func convertResponseContentPart(part any, role string) any {
 }
 
 func convertResponseToolCallItem(item map[string]any) map[string]any {
-	callID := firstNonEmpty(firstString(item["call_id"], item["id"]), "call_"+randomID()[:12])
+	callID := firstNonEmpty(firstString(item["call_id"], item["id"]), "call_"+utils.RandomID()[:12])
 	name := responseToolItemName(item)
 	arguments := responseToolItemArguments(item)
 	if _, ok := arguments.(string); !ok {
@@ -5161,21 +5147,21 @@ func convertResponseToolOutputItem(item map[string]any) map[string]any {
 }
 
 func responseToolItemName(item map[string]any) string {
-	itemType := stringValue(item, "type", "")
+	itemType := utils.StringValue(item, "type", "")
 	switch itemType {
 	case "local_shell_call":
 		return "local_shell"
 	case "shell_call":
 		return "shell"
 	case "custom_tool_call":
-		return firstNonEmpty(stringValue(item, "name", ""), "custom_tool")
+		return firstNonEmpty(utils.StringValue(item, "name", ""), "custom_tool")
 	default:
-		return stringValue(item, "name", "")
+		return utils.StringValue(item, "name", "")
 	}
 }
 
 func responseToolItemArguments(item map[string]any) any {
-	itemType := stringValue(item, "type", "")
+	itemType := utils.StringValue(item, "type", "")
 	if itemType == "local_shell_call" || itemType == "shell_call" {
 		action, _ := item["action"].(map[string]any)
 		return map[string]any{
@@ -5206,35 +5192,35 @@ func normalizeResponsesTools(tools []any) []any {
 }
 
 func normalizeResponsesTool(tool map[string]any) map[string]any {
-	toolType := stringValue(tool, "type", "")
+	toolType := utils.StringValue(tool, "type", "")
 	if toolType == "shell" || toolType == "local_shell" {
 		return map[string]any{"type": "function", "function": map[string]any{
 			"name":        toolType,
-			"description": firstNonEmpty(stringValue(tool, "description", ""), "Run a "+toolType+" command."),
+			"description": firstNonEmpty(utils.StringValue(tool, "description", ""), "Run a "+toolType+" command."),
 			"parameters":  map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_ms": map[string]any{"type": "integer"}, "working_directory": map[string]any{"type": "string"}, "env": map[string]any{"type": "object"}}, "required": []string{"command"}},
 		}}
 	}
 	if toolType == "custom" || toolType == "custom_tool" {
-		name := firstNonEmpty(stringValue(tool, "name", ""), "custom_tool")
+		name := firstNonEmpty(utils.StringValue(tool, "name", ""), "custom_tool")
 		params, _ := tool["parameters"].(map[string]any)
 		if params == nil {
 			params = map[string]any{"type": "object", "properties": map[string]any{"input": map[string]any{"type": "string"}}, "required": []string{"input"}}
 		}
-		return map[string]any{"type": "function", "function": map[string]any{"name": name, "description": firstNonEmpty(stringValue(tool, "description", ""), "Custom text tool."), "parameters": params}}
+		return map[string]any{"type": "function", "function": map[string]any{"name": name, "description": firstNonEmpty(utils.StringValue(tool, "description", ""), "Custom text tool."), "parameters": params}}
 	}
 	if toolType == "function" {
 		fn, _ := tool["function"].(map[string]any)
-		if fn == nil || stringValue(fn, "name", "") == "" {
+		if fn == nil || utils.StringValue(fn, "name", "") == "" {
 			return nil
 		}
 		params := firstNonNil(fn["parameters"], fn["input_schema"], tool["parameters"], map[string]any{})
-		return map[string]any{"type": "function", "function": map[string]any{"name": stringValue(fn, "name", ""), "description": firstNonEmpty(stringValue(fn, "description", ""), stringValue(tool, "description", "")), "parameters": params}}
+		return map[string]any{"type": "function", "function": map[string]any{"name": utils.StringValue(fn, "name", ""), "description": firstNonEmpty(utils.StringValue(fn, "description", ""), utils.StringValue(tool, "description", "")), "parameters": params}}
 	}
-	name := stringValue(tool, "name", "")
+	name := utils.StringValue(tool, "name", "")
 	if name == "" {
 		return nil
 	}
-	return map[string]any{"type": "function", "function": map[string]any{"name": name, "description": stringValue(tool, "description", ""), "parameters": firstNonNil(tool["parameters"], tool["input_schema"], map[string]any{})}}
+	return map[string]any{"type": "function", "function": map[string]any{"name": name, "description": utils.StringValue(tool, "description", ""), "parameters": firstNonNil(tool["parameters"], tool["input_schema"], map[string]any{})}}
 }
 
 func responseStringifyContent(value any) string {
@@ -5390,7 +5376,7 @@ func (app *App) handleAnthropicMessages(w http.ResponseWriter, r *http.Request) 
 		"prompt_len", len(req.Prompt),
 		"prompt_tail", promptTail(req.Prompt, 600),
 	)
-	id := "msg_" + randomID()[:24]
+	id := "msg_" + utils.RandomID()[:24]
 	if req.Stream {
 		app.streamAnthropic(w, r, req, id)
 		return
@@ -5408,7 +5394,7 @@ func anthropicMessages(body map[string]any) []any {
 	if system := body["system"]; system != nil {
 		out = append(out, map[string]any{"role": "system", "content": system})
 	}
-	out = append(out, anyList(body["messages"])...)
+	out = append(out, utils.AnyList(body["messages"])...)
 	return out
 }
 
@@ -5518,14 +5504,14 @@ func (app *App) streamAnthropic(w http.ResponseWriter, r *http.Request, req Stan
 		if !emittedContent {
 			content, finalStopReason, finalOutputTokens := app.anthropicContentBlocks(r.Context(), req, result, "stream_response")
 			for index, block := range content {
-				switch stringValue(block, "type", "") {
+				switch utils.StringValue(block, "type", "") {
 				case "thinking":
 					writeSSEEvent(w, "content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": map[string]any{"type": "thinking", "thinking": ""}})
-					writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": stringValue(block, "thinking", "")}})
+					writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": utils.StringValue(block, "thinking", "")}})
 					writeSSEEvent(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
 				default:
 					writeSSEEvent(w, "content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": map[string]any{"type": "text", "text": ""}})
-					writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": stringValue(block, "text", "")}})
+					writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": utils.StringValue(block, "text", "")}})
 					writeSSEEvent(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
 				}
 			}
@@ -5543,14 +5529,14 @@ func (app *App) streamAnthropic(w http.ResponseWriter, r *http.Request, req Stan
 		return
 	}
 	for index, block := range content {
-		switch stringValue(block, "type", "") {
+		switch utils.StringValue(block, "type", "") {
 		case "thinking":
 			writeSSEEvent(w, "content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": map[string]any{"type": "thinking", "thinking": ""}})
-			writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": stringValue(block, "thinking", "")}})
+			writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "thinking_delta", "thinking": utils.StringValue(block, "thinking", "")}})
 			writeSSEEvent(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
 		default:
 			writeSSEEvent(w, "content_block_start", map[string]any{"type": "content_block_start", "index": index, "content_block": map[string]any{"type": "text", "text": ""}})
-			writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": stringValue(block, "text", "")}})
+			writeSSEEvent(w, "content_block_delta", map[string]any{"type": "content_block_delta", "index": index, "delta": map[string]any{"type": "text_delta", "text": utils.StringValue(block, "text", "")}})
 			writeSSEEvent(w, "content_block_stop", map[string]any{"type": "content_block_stop", "index": index})
 		}
 	}
@@ -5620,20 +5606,20 @@ func geminiModelFromPath(path string) string {
 
 func geminiToChatBody(model string, body map[string]any, stream bool) map[string]any {
 	messages := []any{}
-	for _, raw := range anyList(body["contents"]) {
+	for _, raw := range utils.AnyList(body["contents"]) {
 		m, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		role := stringValue(m, "role", "user")
+		role := utils.StringValue(m, "role", "user")
 		if role == "model" {
 			role = "assistant"
 		}
 		var parts []any
-		for _, part := range anyList(m["parts"]) {
+		for _, part := range utils.AnyList(m["parts"]) {
 			pm, ok := part.(map[string]any)
 			if ok && pm["text"] != nil {
-				parts = append(parts, map[string]any{"type": "text", "text": stringValue(pm, "text", "")})
+				parts = append(parts, map[string]any{"type": "text", "text": utils.StringValue(pm, "text", "")})
 			}
 		}
 		messages = append(messages, map[string]any{"role": role, "content": parts})
@@ -5660,8 +5646,8 @@ func (app *App) handleUploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	ext := fileExt(header.Filename)
-	if !splitExts(app.settings.ContextAllowedUserExts)[ext] {
+	ext := utils.FileExt(header.Filename)
+	if !utils.SplitExts(app.settings.ContextAllowedUserExts)[ext] {
 		utils.WriteError(w, http.StatusBadRequest, "Unsupported file extension: "+ext)
 		return
 	}
@@ -5734,16 +5720,16 @@ func (app *App) handleImages(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	prompt := strings.TrimSpace(stringValue(body, "prompt", ""))
+	prompt := strings.TrimSpace(utils.StringValue(body, "prompt", ""))
 	if prompt == "" {
 		utils.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
-	n := min(max(1, intValue(body, "n", 1)), 4)
-	size, ratio := normalizeMediaSize(firstStringAny(body["size"], body["ratio"], body["aspect_ratio"]))
+	n := min(max(1, utils.IntValue(body, "n", 1)), 4)
+	size, ratio := normalizeMediaSize(utils.FirstStringAny(body["size"], body["ratio"], body["aspect_ratio"]))
 	width, height := mediaDimensions(size)
-	model := resolveMediaModel(stringValue(body, "model", ""), true)
-	setRequestLogFields(r.Context(), "surface", "images", "requested_model", stringValue(body, "model", ""), "resolved_model", model, "stream", "false", "tool_enabled", "false", "prompt_len", len(prompt))
+	model := resolveMediaModel(utils.StringValue(body, "model", ""), true)
+	setRequestLogFields(r.Context(), "surface", "images", "requested_model", utils.StringValue(body, "model", ""), "resolved_model", model, "stream", "false", "tool_enabled", "false", "prompt_len", len(prompt))
 	app.logInfo(r.Context(), "图片生成请求解析完成", "size", size, "ratio", ratio, "width", width, "height", height, "n", n)
 	promptText := "请调用图片生成能力直接生成图片，不要只输出文字描述。如果可以生成图片，请返回可访问的图片链接或包含图片链接的结果。\n" +
 		"强制画布尺寸：" + size + " 像素。强制宽高比：" + ratio + "。必须严格按这个尺寸和比例生成，不要裁切成其它比例，不要改成默认尺寸。\n\n用户需求：" + prompt
@@ -5817,7 +5803,7 @@ func (app *App) createImageURLs(ctx context.Context, model, promptText string, i
 			}
 			if chats, err := app.client.ListChats(ctx, acc.Token, 20); err == nil {
 				for _, chat := range chats {
-					if stringValue(chat, "id", "") == chatID {
+					if utils.StringValue(chat, "id", "") == chatID {
 						answerText += "\n" + mustJSON(chat)
 						break
 					}
@@ -5868,17 +5854,17 @@ func (app *App) handleVideos(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	prompt := strings.TrimSpace(stringValue(body, "prompt", ""))
+	prompt := strings.TrimSpace(utils.StringValue(body, "prompt", ""))
 	if prompt == "" {
 		utils.WriteError(w, http.StatusBadRequest, "prompt is required")
 		return
 	}
-	n := min(max(1, intValue(body, "n", 1)), 2)
-	size, ratio := normalizeMediaSize(firstStringAny(body["size"], body["ratio"], body["aspect_ratio"]))
+	n := min(max(1, utils.IntValue(body, "n", 1)), 2)
+	size, ratio := normalizeMediaSize(utils.FirstStringAny(body["size"], body["ratio"], body["aspect_ratio"]))
 	width, height := mediaDimensions(size)
-	duration := min(max(1, intValue(body, "duration", 5)), 10)
-	model := resolveMediaModel(stringValue(body, "model", ""), false)
-	setRequestLogFields(r.Context(), "surface", "videos", "requested_model", stringValue(body, "model", ""), "resolved_model", model, "stream", "false", "tool_enabled", "false", "prompt_len", len(prompt))
+	duration := min(max(1, utils.IntValue(body, "duration", 5)), 10)
+	model := resolveMediaModel(utils.StringValue(body, "model", ""), false)
+	setRequestLogFields(r.Context(), "surface", "videos", "requested_model", utils.StringValue(body, "model", ""), "resolved_model", model, "stream", "false", "tool_enabled", "false", "prompt_len", len(prompt))
 	app.logInfo(r.Context(), "视频生成请求解析完成", "size", size, "ratio", ratio, "width", width, "height", height, "duration", duration, "n", n)
 	promptText := fmt.Sprintf("%s\n\n视频要求：生成 %d 秒视频，宽高比 %s，参考画面尺寸 %s。", prompt, duration, ratio, size)
 	urls, lastErr := app.createVideoURLs(r.Context(), model, promptText, map[string]any{"size": size, "ratio": ratio, "width": width, "height": height, "duration": duration})
@@ -5937,9 +5923,9 @@ func (app *App) createVideoURLs(ctx context.Context, model, promptText string, v
 				return
 			}
 			if status != http.StatusOK {
-				lastErr = fmt.Errorf("video completion HTTP %d: %s", status, truncate(body, 500))
+				lastErr = fmt.Errorf("video completion HTTP %d: %s", status, utils.Truncate(body, 500))
 				app.classifyAccountErrorFor(acc, lastErr, accountUsageVideo)
-				app.logWarn(ctx, "视频生成上游状态异常", "attempt", attempt+1, "status", status, "body", truncate(body, 240))
+				app.logWarn(ctx, "视频生成上游状态异常", "attempt", attempt+1, "status", status, "body", utils.Truncate(body, 240))
 				return
 			}
 			answerText := body
@@ -6037,7 +6023,7 @@ func (app *App) pollVideoTask(ctx context.Context, token, taskID string, timeout
 				return strings.Join(snapshots, "\n"), nil
 			}
 			if taskStatus != "" && !mediaStatusRunning[taskStatus] {
-				return "", fmt.Errorf("Video task failed status=%s body=%s", taskStatus, truncate(body, 500))
+				return "", fmt.Errorf("Video task failed status=%s body=%s", taskStatus, utils.Truncate(body, 500))
 			}
 		}
 		select {
@@ -6180,7 +6166,7 @@ func taskStatusFromBody(body string) string {
 			return
 		}
 		data, _ := obj["data"].(map[string]any)
-		status = normalizeLower(firstString(obj["task_status"], obj["status"], data["task_status"], data["status"]))
+		status = utils.NormalizeLower(firstString(obj["task_status"], obj["status"], data["task_status"], data["status"]))
 	})
 	return status
 }
@@ -6345,7 +6331,7 @@ func (app *App) adminCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	var users []map[string]any
 	_ = app.usersStore.LoadInto(&users)
-	user := map[string]any{"id": "sk-" + randomID(), "name": stringValue(body, "name", ""), "quota": intValue(body, "quota", 1000000), "used_tokens": 0}
+	user := map[string]any{"id": "sk-" + utils.RandomID(), "name": utils.StringValue(body, "name", ""), "quota": utils.IntValue(body, "quota", 1000000), "used_tokens": 0}
 	users = append(users, user)
 	_ = app.usersStore.Save(users)
 	utils.WriteJSON(w, http.StatusOK, user)
@@ -6379,17 +6365,17 @@ func (app *App) adminAddAccount(w http.ResponseWriter, r *http.Request) {
 		utils.WriteError(w, http.StatusBadRequest, "Invalid JSON body")
 		return
 	}
-	token := stringValue(body, "token", "")
+	token := utils.StringValue(body, "token", "")
 	if token == "" {
 		utils.WriteError(w, http.StatusBadRequest, "token is required")
 		return
 	}
 	acc := Account{
-		Email:      stringValue(body, "email", fmt.Sprintf("manual_%d@qwen", time.Now().Unix())),
-		Password:   stringValue(body, "password", ""),
+		Email:      utils.StringValue(body, "email", fmt.Sprintf("manual_%d@qwen", time.Now().Unix())),
+		Password:   utils.StringValue(body, "password", ""),
 		Token:      token,
-		Cookies:    stringValue(body, "cookies", ""),
-		Username:   stringValue(body, "username", ""),
+		Cookies:    utils.StringValue(body, "cookies", ""),
+		Username:   utils.StringValue(body, "username", ""),
 		StatusCode: "valid",
 	}
 	verify := app.client.VerifyTokenDetail(r.Context(), token)
@@ -6531,7 +6517,7 @@ func (app *App) adminGetSettings(w http.ResponseWriter, r *http.Request) {
 		"keepalive_url":                keepaliveCfg.URL,
 		"keepalive_interval":           keepaliveCfg.Interval,
 		"keepalive_env_locked":         keepaliveCfg.EnvLocked,
-		"keepalive_running":            boolValue(keepaliveStatus["running"]),
+		"keepalive_running":            utils.BoolValue(keepaliveStatus["running"]),
 		"keepalive_status":             keepaliveStatus,
 		"model_aliases":                modelMap,
 	})
@@ -6547,27 +6533,27 @@ func (app *App) adminUpdateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, ok := body["max_inflight_per_account"]; ok {
-		app.settings.MaxInflightPerAccount = intValue(body, "max_inflight_per_account", app.settings.MaxInflightPerAccount)
+		app.settings.MaxInflightPerAccount = utils.IntValue(body, "max_inflight_per_account", app.settings.MaxInflightPerAccount)
 		app.accounts.SetMaxInflight(app.settings.MaxInflightPerAccount)
 	}
 	if _, ok := body["account_ready_set_threshold"]; ok {
-		app.settings.AccountReadySetThreshold = max(1, intValue(body, "account_ready_set_threshold", app.settings.AccountReadySetThreshold))
+		app.settings.AccountReadySetThreshold = max(1, utils.IntValue(body, "account_ready_set_threshold", app.settings.AccountReadySetThreshold))
 		app.accounts.SetReadySetThreshold(app.settings.AccountReadySetThreshold)
 	}
 	if _, ok := body["global_max_inflight"]; ok {
-		app.accounts.SetGlobalMaxInflight(intValue(body, "global_max_inflight", 0))
+		app.accounts.SetGlobalMaxInflight(utils.IntValue(body, "global_max_inflight", 0))
 	}
 	if _, ok := body["tool_recovery_max_attempts"]; ok {
-		app.settings.ToolRecoveryMaxAttempts = clampInt(intValue(body, "tool_recovery_max_attempts", app.settings.ToolRecoveryMaxAttempts), 1, 8)
+		app.settings.ToolRecoveryMaxAttempts = clampInt(utils.IntValue(body, "tool_recovery_max_attempts", app.settings.ToolRecoveryMaxAttempts), 1, 8)
 	}
 	if _, ok := body["chat_id_pool_target"]; ok {
-		app.settings.ChatIDPrewarmTargetPerAccount = max(0, intValue(body, "chat_id_pool_target", app.settings.ChatIDPrewarmTargetPerAccount))
+		app.settings.ChatIDPrewarmTargetPerAccount = max(0, utils.IntValue(body, "chat_id_pool_target", app.settings.ChatIDPrewarmTargetPerAccount))
 	}
 	if _, ok := body["chat_id_pool_ttl_seconds"]; ok {
-		app.settings.ChatIDPrewarmTTLSeconds = max(1, intValue(body, "chat_id_pool_ttl_seconds", app.settings.ChatIDPrewarmTTLSeconds))
+		app.settings.ChatIDPrewarmTTLSeconds = max(1, utils.IntValue(body, "chat_id_pool_ttl_seconds", app.settings.ChatIDPrewarmTTLSeconds))
 	}
 	if _, ok := body["chat_id_pool_max_concurrency"]; ok {
-		app.settings.ChatIDPrewarmMaxConcurrency = max(1, intValue(body, "chat_id_pool_max_concurrency", app.settings.ChatIDPrewarmMaxConcurrency))
+		app.settings.ChatIDPrewarmMaxConcurrency = max(1, utils.IntValue(body, "chat_id_pool_max_concurrency", app.settings.ChatIDPrewarmMaxConcurrency))
 	}
 	if err := app.updateKeepAliveSettings(body); err != nil {
 		utils.WriteError(w, http.StatusBadRequest, err.Error())
@@ -6631,7 +6617,7 @@ func (app *App) adminCreateKey(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	mode := normalizeLower(body.Mode)
+	mode := utils.NormalizeLower(body.Mode)
 	if mode == "" {
 		mode = "auto"
 	}
@@ -6781,14 +6767,14 @@ func extractModelCapabilities(item map[string]any) map[string]bool {
 		applyChatType(v)
 	case []any:
 		for _, item := range v {
-			applyChatType(anyString(item, ""))
+			applyChatType(utils.AnyString(item, ""))
 		}
 	}
 	return caps
 }
 
 func deriveFamily(modelID string, item map[string]any) string {
-	if family := anyString(item["family"], ""); family != "" {
+	if family := utils.AnyString(item["family"], ""); family != "" {
 		return family
 	}
 	if strings.HasPrefix(modelID, "qwen3.") {
@@ -6896,32 +6882,32 @@ func buildChatStandardRequest(body map[string]any, defaultModel, surface string)
 
 func extractThinkingEnabled(body map[string]any) *bool {
 	if value, ok := body["enable_thinking"]; ok {
-		return coerceBool(value)
+		return utils.CoerceBool(value)
 	}
 	if value, ok := body["thinking"]; ok {
 		if m, ok := value.(map[string]any); ok {
 			for _, key := range []string{"enabled", "enable", "enabled_thinking", "enable_thinking"} {
 				if inner, ok := m[key]; ok {
-					return coerceBool(inner)
+					return utils.CoerceBool(inner)
 				}
 			}
 		}
-		return coerceBool(value)
+		return utils.CoerceBool(value)
 	}
 	if value, ok := body["thinking_mode"]; ok {
-		return coerceBool(value)
+		return utils.CoerceBool(value)
 	}
 	return nil
 }
 
 func messagesToPrompt(body map[string]any) (string, []map[string]any) {
 	var parts []string
-	for _, raw := range anyList(body["messages"]) {
+	for _, raw := range utils.AnyList(body["messages"]) {
 		msg, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		role := stringValue(msg, "role", "user")
+		role := utils.StringValue(msg, "role", "user")
 		text := extractContentText(msg["content"])
 		if text == "" {
 			continue
@@ -6957,9 +6943,9 @@ func extractContentText(content any) string {
 			if !ok {
 				continue
 			}
-			switch stringValue(m, "type", "") {
+			switch utils.StringValue(m, "type", "") {
 			case "text", "input_text":
-				if text := compactSystemReminders(stringValue(m, "text", "")); text != "" {
+				if text := compactSystemReminders(utils.StringValue(m, "text", "")); text != "" {
 					parts = append(parts, text)
 				}
 			case "image_url", "input_image", "input_file":
@@ -6967,7 +6953,7 @@ func extractContentText(content any) string {
 				parts = append(parts, string(raw))
 			case "tool_use":
 				raw, _ := json.Marshal(m["input"])
-				parts = append(parts, fmt.Sprintf("<tool_use name=%q>%s</tool_use>", stringValue(m, "name", ""), raw))
+				parts = append(parts, fmt.Sprintf("<tool_use name=%q>%s</tool_use>", utils.StringValue(m, "name", ""), raw))
 			case "tool_result":
 				raw, _ := json.Marshal(m["content"])
 				parts = append(parts, "[Tool Result]\n"+string(raw))
@@ -6982,18 +6968,18 @@ func extractContentText(content any) string {
 
 func normalizeTools(value any) []map[string]any {
 	tools := []map[string]any{}
-	for _, raw := range anyList(value) {
+	for _, raw := range utils.AnyList(value) {
 		m, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if stringValue(m, "type", "") == "function" {
+		if utils.StringValue(m, "type", "") == "function" {
 			if fn, ok := m["function"].(map[string]any); ok {
 				tools = append(tools, fn)
 				continue
 			}
 		}
-		if stringValue(m, "name", "") != "" {
+		if utils.StringValue(m, "name", "") != "" {
 			tools = append(tools, m)
 		}
 	}
@@ -7011,7 +6997,7 @@ func buildToolInstructions(tools []map[string]any) string {
 			params = tool["input_schema"]
 		}
 		raw, _ := json.Marshal(params)
-		blocks = append(blocks, fmt.Sprintf("Tool: %s\nDescription: %s\nParameters: %s", stringValue(tool, "name", ""), trim(stringValue(tool, "description", ""), 100), raw))
+		blocks = append(blocks, fmt.Sprintf("Tool: %s\nDescription: %s\nParameters: %s", utils.StringValue(tool, "name", ""), utils.Trim(utils.StringValue(tool, "description", ""), 100), raw))
 	}
 	return strings.Join(blocks, "\n\n")
 }
@@ -7027,7 +7013,7 @@ func compactSystemReminders(text string) string {
 		if first == "" {
 			return "[system-reminder]"
 		}
-		return "[system-reminder: " + trim(first, 80) + "...]"
+		return "[system-reminder: " + utils.Trim(first, 80) + "...]"
 	})
 }
 
@@ -7191,7 +7177,7 @@ func (app *App) logParsedToolCalls(ctx context.Context, label, stage string, cal
 
 func toolInputPreview(input any, limit int) string {
 	raw := mustJSON(firstNonNil(input, map[string]any{}))
-	return truncate(strings.Join(strings.Fields(raw), " "), limit)
+	return utils.Truncate(strings.Join(strings.Fields(raw), " "), limit)
 }
 
 func parsedToolNames(calls []ParsedToolCall) string {
@@ -7869,7 +7855,7 @@ func qwenHeaders(token string) http.Header {
 func qwenRequestID() string {
 	var b [16]byte
 	if _, err := cryptorand.Read(b[:]); err != nil {
-		id := randomID()
+		id := utils.RandomID()
 		if len(id) >= 32 {
 			return fmt.Sprintf("%s-%s-%s-%s-%s", id[:8], id[8:12], id[12:16], id[16:20], id[20:32])
 		}
@@ -7914,7 +7900,7 @@ func (c *QwenClient) requestJSON(ctx context.Context, method, path, token string
 	raw, _ := io.ReadAll(resp.Body)
 	attrs := []any{"method", method, "path", path, "token", redactToken(token), "upstream_request_id", upstreamRequestID, "status", resp.StatusCode, "bytes", len(raw), "duration_ms", time.Since(start).Milliseconds()}
 	if resp.StatusCode >= 400 {
-		attrs = append(attrs, "body", truncate(string(raw), 240))
+		attrs = append(attrs, "body", utils.Truncate(string(raw), 240))
 		logWarn(c.logger, ctx, "上游请求完成", attrs...)
 	} else {
 		logInfo(c.logger, ctx, "上游请求完成", attrs...)
@@ -7937,21 +7923,21 @@ func (c *QwenClient) CreateChat(ctx context.Context, token, model, chatType stri
 	if status != http.StatusOK {
 		lower := strings.ToLower(text)
 		if status == 401 || status == 403 || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "forbidden") || strings.Contains(lower, "token") || strings.Contains(lower, "login") {
-			return "", fmt.Errorf("unauthorized: create_chat HTTP %d: %s", status, truncate(text, 200))
+			return "", fmt.Errorf("unauthorized: create_chat HTTP %d: %s", status, utils.Truncate(text, 200))
 		}
 		if status == 429 {
 			return "", errors.New("429 Too Many Requests")
 		}
-		return "", fmt.Errorf("create_chat HTTP %d: %s", status, truncate(text, 200))
+		return "", fmt.Errorf("create_chat HTTP %d: %s", status, utils.Truncate(text, 200))
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
-		return "", fmt.Errorf("create_chat parse error: %w, body=%s", err, truncate(text, 200))
+		return "", fmt.Errorf("create_chat parse error: %w, body=%s", err, utils.Truncate(text, 200))
 	}
 	data, _ := payload["data"].(map[string]any)
 	id, _ := data["id"].(string)
 	if payload["success"] == false || id == "" {
-		return "", fmt.Errorf("Qwen API returned error or missing id: %s", truncate(text, 200))
+		return "", fmt.Errorf("Qwen API returned error or missing id: %s", utils.Truncate(text, 200))
 	}
 	logInfo(c.logger, ctx, "创建上游会话成功", "chat_id", id, "model", model, "chat_type", chatType)
 	return id, nil
@@ -7976,7 +7962,7 @@ func (c *QwenClient) DeleteChat(ctx context.Context, token, chatID string) bool 
 			logInfo(c.logger, ctx, "删除上游会话完成", "chat_id", chatID, "attempt", attempt, "status", status)
 			return true
 		}
-		logWarn(c.logger, ctx, "删除上游会话失败", "chat_id", chatID, "attempt", attempt, "status", status, "error", err, "body", truncate(text, 120))
+		logWarn(c.logger, ctx, "删除上游会话失败", "chat_id", chatID, "attempt", attempt, "status", status, "error", err, "body", utils.Truncate(text, 120))
 		time.Sleep(time.Duration(c.settings.ChatDeleteRetryDelaySeconds*float64(attempt)*1000) * time.Millisecond)
 	}
 	return false
@@ -8127,8 +8113,8 @@ func (c *QwenClient) StreamWebChat(ctx context.Context, token, chatID string, pa
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		logWarn(c.logger, ctx, "上游流式返回错误", "chat_id", chatID, "upstream_request_id", upstreamRequestID, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds(), "body", truncate(string(body), 240))
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 800))
+		logWarn(c.logger, ctx, "上游流式返回错误", "chat_id", chatID, "upstream_request_id", upstreamRequestID, "status", resp.StatusCode, "duration_ms", time.Since(start).Milliseconds(), "body", utils.Truncate(string(body), 240))
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, utils.Truncate(string(body), 800))
 	}
 	firstEventTimeout := streamTimeoutDuration(c.settings.UpstreamStreamFirstEventTimeoutSeconds)
 	idleTimeout := streamTimeoutDuration(c.settings.UpstreamStreamIdleTimeoutSeconds)
@@ -8229,7 +8215,7 @@ func (c *QwenClient) StreamWebChat(ctx context.Context, token, chatID string, pa
 						if upstreamError := upstream.ExtractUpstreamError(rawTail); upstreamError != "" {
 							return errors.New(upstreamError)
 						}
-						logWarn(c.logger, ctx, "上游 SSE 未解析到有效 delta", "chat_id", chatID, "stream_bytes", totalBytes, "raw_tail", truncate(rawTail, 500))
+						logWarn(c.logger, ctx, "上游 SSE 未解析到有效 delta", "chat_id", chatID, "stream_bytes", totalBytes, "raw_tail", utils.Truncate(rawTail, 500))
 					}
 					return nil
 				}
@@ -8237,11 +8223,11 @@ func (c *QwenClient) StreamWebChat(ctx context.Context, token, chatID string, pa
 			}
 		case <-firstEventCh:
 			cancel()
-			logWarn(c.logger, ctx, "上游流式首事件超时", "chat_id", chatID, "timeout_seconds", int(firstEventTimeout/time.Second), "duration_ms", time.Since(start).Milliseconds(), "stream_bytes", totalBytes, "raw_tail", truncate(rawTail, 500))
+			logWarn(c.logger, ctx, "上游流式首事件超时", "chat_id", chatID, "timeout_seconds", int(firstEventTimeout/time.Second), "duration_ms", time.Since(start).Milliseconds(), "stream_bytes", totalBytes, "raw_tail", utils.Truncate(rawTail, 500))
 			return fmt.Errorf("upstream stream first event timeout after %s without parsed SSE event", firstEventTimeout)
 		case <-idleCh:
 			cancel()
-			logWarn(c.logger, ctx, "上游流式空闲超时", "chat_id", chatID, "timeout_seconds", int(idleTimeout/time.Second), "events", events, "duration_ms", time.Since(start).Milliseconds(), "stream_bytes", totalBytes, "raw_tail", truncate(rawTail, 500))
+			logWarn(c.logger, ctx, "上游流式空闲超时", "chat_id", chatID, "timeout_seconds", int(idleTimeout/time.Second), "events", events, "duration_ms", time.Since(start).Milliseconds(), "stream_bytes", totalBytes, "raw_tail", utils.Truncate(rawTail, 500))
 			return fmt.Errorf("upstream stream idle timeout after %s without parsed SSE event", idleTimeout)
 		case <-streamCtx.Done():
 			return streamCtx.Err()
@@ -8277,7 +8263,7 @@ func (c *QwenClient) PostChatCompletionOnce(ctx context.Context, token, chatID s
 	body, _ := io.ReadAll(resp.Body)
 	attrs := []any{"chat_id", chatID, "status", resp.StatusCode, "bytes", len(body), "duration_ms", time.Since(start).Milliseconds()}
 	if resp.StatusCode >= 400 {
-		attrs = append(attrs, "body", truncate(string(body), 240))
+		attrs = append(attrs, "body", utils.Truncate(string(body), 240))
 		logWarn(c.logger, ctx, "上游非流式请求完成", attrs...)
 	} else {
 		logInfo(c.logger, ctx, "上游非流式请求完成", attrs...)
@@ -8306,15 +8292,15 @@ func (c *QwenClient) ListChats(ctx context.Context, token string, limit int) ([]
 		return nil, err
 	}
 	if status != http.StatusOK {
-		logWarn(c.logger, ctx, "查询上游会话列表状态异常", "limit", limit, "status", status, "body", truncate(text, 240))
-		return nil, fmt.Errorf("list_chats HTTP %d: %s", status, truncate(text, 200))
+		logWarn(c.logger, ctx, "查询上游会话列表状态异常", "limit", limit, "status", status, "body", utils.Truncate(text, 240))
+		return nil, fmt.Errorf("list_chats HTTP %d: %s", status, utils.Truncate(text, 200))
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(text), &payload); err != nil {
 		logWarn(c.logger, ctx, "解析上游会话列表失败", "limit", limit, "error", err)
 		return nil, err
 	}
-	items := mapList(payload["data"])
+	items := utils.MapList(payload["data"])
 	logInfo(c.logger, ctx, "查询上游会话列表完成", "limit", limit, "count", len(items))
 	return items, nil
 }
@@ -8338,8 +8324,8 @@ func (c *QwenClient) ListModelsFromPool(ctx context.Context) ([]map[string]any, 
 			logWarn(c.logger, ctx, "拉取上游模型请求失败", "account", acc.Email, "error", err)
 			return nil, err
 		} else {
-			logWarn(c.logger, ctx, "拉取上游模型状态异常", "account", acc.Email, "status", status, "body", truncate(text, 240))
-			return nil, fmt.Errorf("list_models HTTP %d: %s", status, truncate(text, 200))
+			logWarn(c.logger, ctx, "拉取上游模型状态异常", "account", acc.Email, "status", status, "body", utils.Truncate(text, 240))
+			return nil, fmt.Errorf("list_models HTTP %d: %s", status, utils.Truncate(text, 200))
 		}
 	}
 	var decoded any
@@ -8347,7 +8333,7 @@ func (c *QwenClient) ListModelsFromPool(ctx context.Context) ([]map[string]any, 
 		logWarn(c.logger, ctx, "解析上游模型失败", "account", acc.Email, "error", err)
 		return nil, err
 	}
-	models := extractModelList(decoded)
+	models := utils.ExtractModelList(decoded)
 	logInfo(c.logger, ctx, "拉取上游模型完成", "account", acc.Email, "count", len(models))
 	return models, nil
 }
@@ -8381,8 +8367,8 @@ func (c *QwenClient) VerifyTokenDetail(ctx context.Context, token string) TokenV
 	case strings.Contains(lower, "ban") || strings.Contains(lower, "disabled"):
 		statusCode = "banned"
 	}
-	result := TokenVerifyResult{StatusCode: statusCode, Error: fmt.Sprintf("HTTP %d: %s", status, truncate(text, 200))}
-	logWarn(c.logger, ctx, "账号 Token 验证失败", "token", redactToken(token), "status", status, "status_code", statusCode, "body", truncate(text, 240))
+	result := TokenVerifyResult{StatusCode: statusCode, Error: fmt.Sprintf("HTTP %d: %s", status, utils.Truncate(text, 200))}
+	logWarn(c.logger, ctx, "账号 Token 验证失败", "token", redactToken(token), "status", status, "status_code", statusCode, "body", utils.Truncate(text, 240))
 	return result
 }
 
@@ -8498,7 +8484,7 @@ func (app *App) withRequestLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
 		if reqID == "" {
-			reqID = randomID()[:8]
+			reqID = utils.RandomID()[:8]
 		}
 		logCtx := &requestLogContext{
 			ReqID:       reqID,
@@ -8517,9 +8503,9 @@ func (app *App) withRequestLogging(next http.Handler) http.Handler {
 		app.logInfo(ctx, "请求进入",
 			"method", r.Method,
 			"path", r.URL.Path,
-			"query", truncate(r.URL.RawQuery, 240),
+			"query", utils.Truncate(r.URL.RawQuery, 240),
 			"remote", r.RemoteAddr,
-			"user_agent", truncate(r.UserAgent(), 160),
+			"user_agent", utils.Truncate(r.UserAgent(), 160),
 		)
 
 		defer func() {
@@ -8595,21 +8581,21 @@ func setRequestLogFields(ctx context.Context, fields ...any) {
 		}
 		switch key {
 		case "surface":
-			info.Surface = anyString(fields[i+1], info.Surface)
+			info.Surface = utils.AnyString(fields[i+1], info.Surface)
 		case "requested_model":
-			info.RequestedModel = anyString(fields[i+1], info.RequestedModel)
+			info.RequestedModel = utils.AnyString(fields[i+1], info.RequestedModel)
 		case "resolved_model":
-			info.ResolvedModel = anyString(fields[i+1], info.ResolvedModel)
+			info.ResolvedModel = utils.AnyString(fields[i+1], info.ResolvedModel)
 		case "chat_id":
-			info.ChatID = anyString(fields[i+1], info.ChatID)
+			info.ChatID = utils.AnyString(fields[i+1], info.ChatID)
 		case "account":
-			info.Account = anyString(fields[i+1], info.Account)
+			info.Account = utils.AnyString(fields[i+1], info.Account)
 		case "stream":
-			info.Stream = anyString(fields[i+1], info.Stream)
+			info.Stream = utils.AnyString(fields[i+1], info.Stream)
 		case "tool_enabled":
-			info.ToolEnabled = anyString(fields[i+1], info.ToolEnabled)
+			info.ToolEnabled = utils.AnyString(fields[i+1], info.ToolEnabled)
 		case "test_marker":
-			info.TestMarker = anyString(fields[i+1], info.TestMarker)
+			info.TestMarker = utils.AnyString(fields[i+1], info.TestMarker)
 		case "prompt_len":
 			if value, ok := fields[i+1].(int); ok {
 				info.PromptLen = value
@@ -8832,7 +8818,7 @@ func parseXMLToolCalls(text string, allowed map[string]string) []ParsedToolCall 
 				continue
 			}
 			input := parseToolInput(strings.TrimSpace(match[2]))
-			calls = append(calls, ParsedToolCall{ID: "call_" + randomID()[:12], Name: name, Input: input})
+			calls = append(calls, ParsedToolCall{ID: "call_" + utils.RandomID()[:12], Name: name, Input: input})
 		}
 	}
 	return calls
@@ -8863,7 +8849,7 @@ func parseJSONToolCalls(value any, allowed map[string]string) []ParsedToolCall {
 			}
 		}
 		if name = canonicalToolName(name, allowed); name != "" {
-			calls = append(calls, ParsedToolCall{ID: firstNonEmpty(firstString(v["id"], v["call_id"]), "call_"+randomID()[:12]), Name: name, Input: normalizeToolInput(input)})
+			calls = append(calls, ParsedToolCall{ID: firstNonEmpty(firstString(v["id"], v["call_id"]), "call_"+utils.RandomID()[:12]), Name: name, Input: normalizeToolInput(input)})
 		}
 	case []any:
 		for _, item := range v {
@@ -8948,185 +8934,4 @@ func imageRatio(options map[string]any) string {
 		}
 	}
 	return "1:1"
-}
-
-// ---- migrated from util.go ----
-func normalizeLower(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
-
-func randomID() string {
-	buf := make([]byte, 16)
-	if _, err := cryptorand.Read(buf); err != nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	return hex.EncodeToString(buf)
-}
-
-// func writeError(w http.ResponseWriter, status int, detail any) {
-// 	utils.WriteJSON(w, status, map[string]any{"detail": sanitizeClientErrorDetail(detail)})
-// }
-
-// func utils.DecodeJSON(r *http.Request, dst any) error {
-// 	defer r.Body.Close()
-// 	dec := json.NewDecoder(io.LimitReader(r.Body, 256<<20))
-// 	dec.UseNumber()
-// 	return dec.Decode(dst)
-// }
-
-func stringValue(m map[string]any, key, fallback string) string {
-	if m == nil {
-		return fallback
-	}
-	v, ok := m[key]
-	if !ok {
-		return fallback
-	}
-	return anyString(v, fallback)
-}
-
-func anyString(v any, fallback string) string {
-	switch x := v.(type) {
-	case string:
-		if x != "" {
-			return x
-		}
-	case json.Number:
-		return x.String()
-	case fmt.Stringer:
-		return x.String()
-	}
-	return fallback
-}
-
-func intValue(m map[string]any, key string, fallback int) int {
-	v, ok := m[key]
-	if !ok {
-		return fallback
-	}
-	switch x := v.(type) {
-	case int:
-		return x
-	case float64:
-		return int(x)
-	case json.Number:
-		if i, err := strconv.Atoi(x.String()); err == nil {
-			return i
-		}
-	case string:
-		if i, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
-			return i
-		}
-	}
-	return fallback
-}
-
-func boolValue(v any) bool {
-	b, _ := v.(bool)
-	return b
-}
-
-func coerceBool(v any) *bool {
-	switch x := v.(type) {
-	case bool:
-		return &x
-	case float64:
-		b := x != 0
-		return &b
-	case json.Number:
-		i, _ := strconv.Atoi(x.String())
-		b := i != 0
-		return &b
-	case string:
-		switch normalizeLower(x) {
-		case "1", "true", "yes", "on", "enable", "enabled", "auto", "thinking":
-			b := true
-			return &b
-		case "0", "false", "no", "off", "disable", "disabled", "fast", "none":
-			b := false
-			return &b
-		}
-	}
-	return nil
-}
-
-func anyList(v any) []any {
-	if list, ok := v.([]any); ok {
-		return list
-	}
-	return nil
-}
-
-func firstStringAny(values ...any) string {
-	for _, v := range values {
-		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-			return strings.TrimSpace(s)
-		}
-	}
-	return ""
-}
-
-func extractModelList(decoded any) []map[string]any {
-	switch v := decoded.(type) {
-	case []any:
-		return mapList(v)
-	case map[string]any:
-		if out := mapList(v["data"]); len(out) > 0 {
-			return out
-		}
-		if out := mapList(v["models"]); len(out) > 0 {
-			return out
-		}
-	}
-	return nil
-}
-
-func mapList(v any) []map[string]any {
-	raw, ok := v.([]any)
-	if !ok {
-		return nil
-	}
-	out := make([]map[string]any, 0, len(raw))
-	for _, item := range raw {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-func pseudoEmbedding(text string) []float64 {
-	h := fnv.New64a()
-	_, _ = h.Write([]byte(text))
-	base := float64(h.Sum64()%math.MaxUint32) / float64(math.MaxUint32)
-	vec := make([]float64, 1536)
-	for i := range vec {
-		vec[i] = (base*float64(i%10))/10.0 - 0.5
-	}
-	return vec
-}
-
-func splitExts(value string) map[string]bool {
-	out := map[string]bool{}
-	for _, item := range strings.Split(value, ",") {
-		item = strings.Trim(strings.ToLower(item), " .")
-		if item != "" {
-			out[item] = true
-		}
-	}
-	return out
-}
-
-func fileExt(name string) string {
-	return strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
-}
-
-func truncate(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if limit <= 0 || len(text) <= limit {
-		return text
-	}
-	return text[:limit]
-}
-
-func trim(text string, limit int) string {
-	return truncate(text, limit)
 }
