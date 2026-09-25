@@ -8,38 +8,34 @@
   <h1>Web2API</h1>
 
   <p>
-    Self-hosted Qwen Web protocol gateway with OpenAI, Anthropic, and Gemini compatible APIs.
+    A browser-first Qwen Web gateway that drives the Qwen Web chat directly via Playwright, exposing OpenAI, Anthropic, and Gemini compatible APIs.
   </p>
 
   <p>
     <a href="https://github.com/welcomemonth/web2api">GitHub</a> ·
-    <a href="https://hub.docker.com/r/yujunzhixue/qwen2api">Docker Hub</a> ·
-    <a href="https://t.me/qwen2api">Telegram</a> ·
     <a href="./README_CN.md">中文说明</a>
   </p>
 
   <p>
     <a href="https://github.com/welcomemonth/web2api/releases">
-      <img src="https://img.shields.io/github/v/release/YuJunZhiXue/qwen2API?logo=github&label=Version&style=flat-square" alt="Release">
+      <img src="https://img.shields.io/github/v/release/welcomemonth/web2api?logo=github&label=Version&style=flat-square" alt="Release">
     </a>
     <a href="https://github.com/welcomemonth/web2api/stargazers">
-      <img src="https://img.shields.io/github/stars/YuJunZhiXue/qwen2API?logo=github&style=flat-square&label=Stars" alt="Stars">
-    </a>
-    <a href="https://hub.docker.com/r/yujunzhixue/qwen2api">
-      <img src="https://img.shields.io/badge/Docker%20Hub-yujunzhixue%2Fqwen2api-2496ED?logo=docker&style=flat-square" alt="Docker Hub">
+      <img src="https://img.shields.io/github/stars/welcomemonth/web2api?logo=github&style=flat-square&label=Stars" alt="Stars">
     </a>
     <img src="https://img.shields.io/badge/Backend-Go%201.26-00ADD8?logo=go&style=flat-square" alt="Go">
     <img src="https://img.shields.io/badge/WebUI-React%2019-61DAFB?logo=react&style=flat-square" alt="React">
+    <img src="https://img.shields.io/badge/Driver-Playwright-2EAD33?logo=playwright&style=flat-square" alt="Playwright">
     <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   </p>
 </div>
 
 ## 一、项目简介 / Project Overview
 
-qwen2API converts Qwen Web capabilities into common API protocols and provides a local WebUI for account management, downstream API keys, runtime settings, model tests, image tests, and video tests.
+web2api is a browser-first Qwen Web gateway: it drives the real Qwen Web chat interface with Playwright and exposes it as OpenAI, Anthropic, and Gemini compatible APIs. A local WebUI covers account management, downstream API keys, runtime settings, and model/image/video tests.
 
 > [!NOTE]
-> `v1.0` was the legacy Python + FastAPI implementation. `v2.0` is the current Go backend + React WebUI mainline and is the recommended version for Docker and local deployments.
+> This project is a fork of [qwen2API](https://github.com/YuJunZhiXue/qwen2API). The main change is that it uses the Qwen **Web** interface directly (browser automation) instead of reverse-engineering the internal HTTP API. Each Qwen account is bound to a real Web chat session (`Chat_ID`), so only the current message is sent upstream instead of the full prompt history.
 
 ### 1. Feature Map
 
@@ -48,6 +44,7 @@ qwen2API converts Qwen Web capabilities into common API protocols and provides a
 | OpenAI-compatible APIs | `/v1/chat/completions`, `/v1/responses`, `/v1/models`, `/v1/files`, `/v1/images/generations`, `/v1/videos/generations` |
 | Anthropic-compatible APIs | `/v1/messages`, `/anthropic/v1/messages`, `/v1/messages/count_tokens` |
 | Gemini-compatible APIs | `/v1beta/models/{model}:generateContent`, `/v1beta/models/{model}:streamGenerateContent` |
+| Browser upstream | Playwright-driven Qwen Web chat, headless browser pool, `Chat_ID` session binding and prewarm |
 | WebUI | Accounts, API keys, runtime config, chat test, image test, video test |
 | Account pool | Multi-account rotation, per-account concurrency, separate chat/image/video cooldown tracking |
 | Operations | `/healthz`, `/readyz`, `/keepalive`, Docker healthcheck, multi-arch image publishing |
@@ -56,18 +53,22 @@ qwen2API converts Qwen Web capabilities into common API protocols and provides a
 
 | Version | Stack | Status |
 | --- | --- | --- |
-| `v1.0` | Python + FastAPI/Uvicorn | Legacy version, kept only as historical context |
-| `v2.0` | Go backend + React WebUI | Current mainline |
+| `qwen2API v1.0` | Python + FastAPI/Uvicorn | Upstream legacy version, kept only as historical context |
+| `qwen2API v2.0` | Go backend + React WebUI | Upstream mainline that this fork is based on |
+| `web2api` | Go backend + React WebUI + Playwright | This project, browser-first |
 
 ## 二、快速部署 / Quick Deployment
 
-### 1. Pull From Docker Hub
+### 1. Docker Deployment
 
-For most deployments, use the Docker Hub image directly. Keep `data` and `logs` beside your compose file; Docker will mount them into the container so upgrades do not wipe your accounts, keys, or logs.
+For most deployments, use the Docker image directly. Keep `data` and `logs` beside your compose file; Docker will mount them into the container so upgrades do not wipe your accounts, keys, or logs.
+
+> [!NOTE]
+> If the `welcomemonth/web2api` image is not published yet, use [Build Locally With Docker](#2-build-locally-with-docker) instead.
 
 ```bash
-mkdir qwen2api
-cd qwen2api
+mkdir web2api
+cd web2api
 mkdir -p data logs
 ```
 
@@ -84,9 +85,9 @@ Create `docker-compose.yml`:
 
 ```yaml
 services:
-  qwen2api:
-    image: ${QWEN2API_IMAGE:-yujunzhixue/qwen2api:latest}
-    container_name: qwen2api
+  web2api:
+    image: ${WEB2API_IMAGE:-welcomemonth/web2api:latest}
+    container_name: web2api
     restart: unless-stopped
     init: true
     env_file:
@@ -112,7 +113,7 @@ Start it:
 ```bash
 docker compose pull
 docker compose up -d
-docker compose logs -f qwen2api
+docker compose logs -f web2api
 ```
 
 Open:
@@ -127,7 +128,7 @@ Use this path when you changed the source code and need to build your own image.
 
 ```bash
 git clone https://github.com/welcomemonth/web2api.git
-cd qwen2API
+cd web2api
 cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml build
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
@@ -146,12 +147,13 @@ flowchart LR
     CLI["Claude Code / Codex / other CLI tools"]
   end
 
-  subgraph App["qwen2API v2.0"]
+  subgraph App["web2api"]
     WebUI["React WebUI"]
     Router["Go HTTP Router"]
     Adapter["Protocol Adapters"]
     Tools["Tool-call / Context Pipeline"]
     Pool["Qwen Account Pool"]
+    Browser["Playwright Browser Pool"]
     Store["JSON Stores / Data Files"]
   end
 
@@ -161,7 +163,7 @@ flowchart LR
     Logs["./logs volume"]
   end
 
-  Qwen["Qwen Web Upstream"]
+  Qwen["Qwen Web Chat"]
 
   OpenAI --> Router
   Anthropic --> Router
@@ -171,7 +173,8 @@ flowchart LR
   Router --> Adapter
   Adapter --> Tools
   Tools --> Pool
-  Pool --> Qwen
+  Pool --> Browser
+  Browser --> Qwen
   Pool --> Store
   Store --> Data
   Router --> Logs
@@ -187,6 +190,11 @@ Do not commit real secrets. `.env.example` intentionally contains empty values a
 | `ADMIN_KEY` | WebUI and `/api/admin/*` management key. Set a strong private value. |
 | `QWEN_API_KEY`, `QWEN_API_KEYS`, `QWEN_API_KEY_N` | Runtime-only downstream API keys injected from env. They are not saved to `data/api_keys.json` and cannot be deleted from WebUI. |
 | `QWEN_ACCOUNT_N` | Runtime-only upstream Qwen account, format `token;optional-email;optional-password`. It is not saved to `data/accounts.json`. |
+| `BROWSER_POOL_SIZE` | Number of headless browser instances in the pool. Default `1`. |
+| `BROWSER_STREAM_TIMEOUT_SECONDS` | Timeout for a browser-driven stream. Default `1800`. |
+| `MAX_INFLIGHT_PER_ACCOUNT` | Maximum concurrent requests per Qwen account. Default `2`. |
+| `CHAT_ID_PREWARM_TARGET_PER_ACCOUNT` | Number of Qwen Web chat sessions to pre-create per account. Default `5`. |
+| `CHAT_ID_PREWARM_TTL_SECONDS` / `CHAT_ID_PREWARM_MAX_CONCURRENCY` | TTL and max concurrency for the `Chat_ID` prewarm pool. Defaults `120` / `16`. |
 | `KEEPALIVE_URL`, `KEEPALIVE_INTERVAL` | Optional background keepalive task. Env values lock the same WebUI settings. |
 | `TOOL_RECOVERY_MAX_ATTEMPTS` | Maximum automatic recovery attempts when an upstream response after a tool result fails to produce the next client tool call. Default `4`, clamped to `1`-`8`. |
 | `HOST_DATA_DIR`, `HOST_LOGS_DIR` | Host paths mounted into Docker as `/app/data` and `/app/logs`. Defaults are `./data` and `./logs`. |
@@ -200,6 +208,7 @@ Do not commit real secrets. `.env.example` intentionally contains empty values a
 - Node.js `20+`
 - npm
 - Docker, only if you need container builds
+- Playwright browsers (run with `--install-browsers`, or `go run start-all.go --install-browsers`)
 
 ### 2. One-Command Local Startup
 
@@ -219,7 +228,7 @@ Verification:
 ```powershell
 cd backend
 go test ./...
-go build -trimpath -ldflags="-s -w" -o ..\bin\qwen2api-backend.exe .
+go build -trimpath -ldflags="-s -w" -o ..\bin\web2api-backend.exe .
 ```
 
 ### 4. Frontend Development
@@ -239,7 +248,7 @@ npm run build
 
 ### 5. Development Rules
 
-- Keep the Go backend as the `v2.0` runtime source of truth.
+- Keep the Go backend as the runtime source of truth.
 - Keep Docker data paths container-internal as `/app/data` and `/app/logs`.
 - Control host paths through compose volume mappings instead of hard-coded workspace paths.
 - Do not commit `data/`, `logs/`, `.env`, real tokens, cookies, passwords, or downstream API keys.
@@ -263,15 +272,15 @@ npm run build
 
 ### 3. Contributors
 
-Thanks to everyone who helps improve qwen2API.
+Thanks to everyone who helps improve web2api.
 
-[![Contributors](https://contrib.rocks/image?repo=YuJunZhiXue/qwen2API)](https://github.com/welcomemonth/web2api/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=welcomemonth/web2api)](https://github.com/welcomemonth/web2api/graphs/contributors)
 
 ## 六、其他信息 / Other Information
 
 ### 1. Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=YuJunZhiXue/qwen2API&type=Timeline)](https://www.star-history.com/#YuJunZhiXue/qwen2API&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=welcomemonth/web2api&type=Timeline)](https://www.star-history.com/#welcomemonth/web2api&Timeline)
 
 ### 2. License
 
@@ -286,11 +295,12 @@ This project is released under the [GPL-3.0 License](./LICENSE).
 
 ### 4. Acknowledgements
 
+- 特别鸣谢: [qwen2API](https://github.com/YuJunZhiXue/qwen2API) — this project is a fork of qwen2API, thanks to [YuJunZhiXue](https://github.com/YuJunZhiXue) and all qwen2API contributors.
 - 特别鸣谢: [LinuxDo](https://linux.do/)
 
 ---
 
 <div align="center">
-  <p>If qwen2API helps you, consider giving the project a Star.</p>
-  <p>Made by <a href="https://github.com/YuJunZhiXue">YuJunZhiXue</a> and contributors.</p>
+  <p>If web2api helps you, consider giving the project a Star.</p>
+  <p>Made by <a href="https://github.com/welcomemonth">welcomemonth</a>, based on <a href="https://github.com/YuJunZhiXue/qwen2API">qwen2API</a> by <a href="https://github.com/YuJunZhiXue">YuJunZhiXue</a>.</p>
 </div>

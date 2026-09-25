@@ -1,45 +1,41 @@
 [English](README.md) | [简体中文](README_CN.md)
 
 <div align="center">
-  <a href="https://github.com/YuJunZhiXue/qwen2API">
-    <img src="https://img.shields.io/badge/Qwen-2API-1677ff?style=for-the-badge&logo=alibabacloud&logoColor=white" alt="qwen2API" height="80">
+  <a href="https://github.com/welcomemonth/web2api">
+    <img src="https://img.shields.io/badge/Web-2API-1677ff?style=for-the-badge&logo=alibabacloud&logoColor=white" alt="Web2API" height="80">
   </a>
 
-  <h1>qwen2API</h1>
+  <h1>Web2API</h1>
 
   <p>
-    自托管千问 Web 协议转换网关，提供 OpenAI、Anthropic、Gemini 兼容接口。
+    浏览器优先的千问 Web 网关，通过 Playwright 直接驱动千问 Web 对话，对外提供 OpenAI、Anthropic、Gemini 兼容接口。
   </p>
 
   <p>
-    <a href="https://github.com/YuJunZhiXue/qwen2API">GitHub</a> ·
-    <a href="https://hub.docker.com/r/yujunzhixue/qwen2api">Docker Hub</a> ·
-    <a href="https://t.me/qwen2api">Telegram</a> ·
+    <a href="https://github.com/welcomemonth/web2api">GitHub</a> ·
     <a href="./README.md">English README</a>
   </p>
 
   <p>
-    <a href="https://github.com/YuJunZhiXue/qwen2API/releases">
-      <img src="https://img.shields.io/github/v/release/YuJunZhiXue/qwen2API?logo=github&label=Version&style=flat-square" alt="Release">
+    <a href="https://github.com/welcomemonth/web2api/releases">
+      <img src="https://img.shields.io/github/v/release/welcomemonth/web2api?logo=github&label=Version&style=flat-square" alt="Release">
     </a>
-    <a href="https://github.com/YuJunZhiXue/qwen2API/stargazers">
-      <img src="https://img.shields.io/github/stars/YuJunZhiXue/qwen2API?logo=github&style=flat-square&label=Stars" alt="Stars">
-    </a>
-    <a href="https://hub.docker.com/r/yujunzhixue/qwen2api">
-      <img src="https://img.shields.io/badge/Docker%20Hub-yujunzhixue%2Fqwen2api-2496ED?logo=docker&style=flat-square" alt="Docker Hub">
+    <a href="https://github.com/welcomemonth/web2api/stargazers">
+      <img src="https://img.shields.io/github/stars/welcomemonth/web2api?logo=github&style=flat-square&label=Stars" alt="Stars">
     </a>
     <img src="https://img.shields.io/badge/Backend-Go%201.26-00ADD8?logo=go&style=flat-square" alt="Go">
     <img src="https://img.shields.io/badge/WebUI-React%2019-61DAFB?logo=react&style=flat-square" alt="React">
+    <img src="https://img.shields.io/badge/Driver-Playwright-2EAD33?logo=playwright&style=flat-square" alt="Playwright">
     <img src="https://img.shields.io/badge/License-GPL--3.0-blue?style=flat-square" alt="License">
   </p>
 </div>
 
 ## 一、项目简介
 
-qwen2API 将千问 Web 能力转换为常见 API 协议，并提供本地 WebUI，用于管理上游账号、下游 API Key、运行配置、模型测试、图片测试和视频测试。
+web2api 是一个浏览器优先的千问 Web 网关：通过 Playwright 直接驱动千问 Web 对话界面，对外提供 OpenAI、Anthropic、Gemini 兼容接口。本地 WebUI 用于管理上游账号、下游 API Key、运行配置，以及模型/图片/视频测试。
 
 > [!NOTE]
-> `v1.0` 是旧版 Python + FastAPI 实现，仅作为历史版本说明保留。`v2.0` 是当前主线，采用 Go 后端 + React WebUI，也是推荐的 Docker 与本地部署版本。
+> 本项目是基于 [qwen2API](https://github.com/YuJunZhiXue/qwen2API) 的二次开发。主要改动是改为直接使用千问 **Web** 界面（浏览器自动化），而不是逆向内部 HTTP 接口。每个千问账号绑定一个真实的 Web 会话（`Chat_ID`），因此上游只需发送当前消息，无需传递完整的历史 prompt。
 
 ### 1. 功能概览
 
@@ -48,6 +44,7 @@ qwen2API 将千问 Web 能力转换为常见 API 协议，并提供本地 WebUI�
 | OpenAI 兼容接口 | `/v1/chat/completions`、`/v1/responses`、`/v1/models`、`/v1/files`、`/v1/images/generations`、`/v1/videos/generations` |
 | Anthropic 兼容接口 | `/v1/messages`、`/anthropic/v1/messages`、`/v1/messages/count_tokens` |
 | Gemini 兼容接口 | `/v1beta/models/{model}:generateContent`、`/v1beta/models/{model}:streamGenerateContent` |
+| 浏览器上游 | Playwright 驱动的千问 Web 对话、无头浏览器池、`Chat_ID` 会话绑定与预热 |
 | WebUI | 账号管理、API Key 管理、运行配置、对话测试、图片测试、视频测试 |
 | 账号池 | 多账号轮询、单账号并发控制、对话/图片/视频分用途冷却记录 |
 | 运维接口 | `/healthz`、`/readyz`、`/keepalive`、Docker Healthcheck、多架构镜像发布 |
@@ -56,18 +53,22 @@ qwen2API 将千问 Web 能力转换为常见 API 协议，并提供本地 WebUI�
 
 | 版本 | 技术栈 | 状态 |
 | --- | --- | --- |
-| `v1.0` | Python + FastAPI/Uvicorn | 旧版实现，仅保留历史说明 |
-| `v2.0` | Go 后端 + React WebUI | 当前主线 |
+| `qwen2API v1.0` | Python + FastAPI/Uvicorn | 上游旧版实现，仅保留历史说明 |
+| `qwen2API v2.0` | Go 后端 + React WebUI | 本项目基于的上游主线 |
+| `web2api` | Go 后端 + React WebUI + Playwright | 本项目，浏览器优先 |
 
 ## 二、快速部署
 
-### 1. Docker Hub 拉取部署
+### 1. Docker 部署
 
-大多数情况下，直接用 Docker Hub 镜像就够了。把 `data` 和 `logs` 放在 compose 文件旁边，Docker 会把它们挂载进容器；以后更新镜像时，账号、Key 和日志都还在。
+大多数情况下，直接用 Docker 镜像就够了。把 `data` 和 `logs` 放在 compose 文件旁边，Docker 会把它们挂载进容器；以后更新镜像时，账号、Key 和日志都还在。
+
+> [!NOTE]
+> 如果 `welcomemonth/web2api` 镜像尚未发布，请改用 [本地 Docker 编译](#2-本地-docker-编译)。
 
 ```bash
-mkdir qwen2api
-cd qwen2api
+mkdir web2api
+cd web2api
 mkdir -p data logs
 ```
 
@@ -84,9 +85,9 @@ ADMIN_KEY=replace-with-your-own-strong-random-key
 
 ```yaml
 services:
-  qwen2api:
-    image: ${QWEN2API_IMAGE:-yujunzhixue/qwen2api:latest}
-    container_name: qwen2api
+  web2api:
+    image: ${WEB2API_IMAGE:-welcomemonth/web2api:latest}
+    container_name: web2api
     restart: unless-stopped
     init: true
     env_file:
@@ -112,7 +113,7 @@ services:
 ```bash
 docker compose pull
 docker compose up -d
-docker compose logs -f qwen2api
+docker compose logs -f web2api
 ```
 
 访问地址：
@@ -126,8 +127,8 @@ docker compose logs -f qwen2api
 当你修改了源码并需要构建自己的镜像时，使用本地 Docker 编译方式。
 
 ```bash
-git clone https://github.com/YuJunZhiXue/qwen2API.git
-cd qwen2API
+git clone https://github.com/welcomemonth/web2api.git
+cd web2api
 cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml build
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
@@ -146,12 +147,13 @@ flowchart LR
     CLI["Claude Code / Codex / other CLI tools"]
   end
 
-  subgraph App["qwen2API v2.0"]
+  subgraph App["web2api"]
     WebUI["React WebUI"]
     Router["Go HTTP Router"]
     Adapter["Protocol Adapters"]
     Tools["Tool-call / Context Pipeline"]
     Pool["Qwen Account Pool"]
+    Browser["Playwright Browser Pool"]
     Store["JSON Stores / Data Files"]
   end
 
@@ -161,7 +163,7 @@ flowchart LR
     Logs["./logs volume"]
   end
 
-  Qwen["Qwen Web Upstream"]
+  Qwen["Qwen Web Chat"]
 
   OpenAI --> Router
   Anthropic --> Router
@@ -171,7 +173,8 @@ flowchart LR
   Router --> Adapter
   Adapter --> Tools
   Tools --> Pool
-  Pool --> Qwen
+  Pool --> Browser
+  Browser --> Qwen
   Pool --> Store
   Store --> Data
   Router --> Logs
@@ -187,6 +190,11 @@ flowchart LR
 | `ADMIN_KEY` | WebUI 和 `/api/admin/*` 管理接口 Key，请自行设置强随机值 |
 | `QWEN_API_KEY`、`QWEN_API_KEYS`、`QWEN_API_KEY_N` | 环境变量注入的下游 API Key，仅运行时存在，不写入 `data/api_keys.json`，不能从 WebUI 删除 |
 | `QWEN_ACCOUNT_N` | 环境变量注入的上游账号，格式为 `token;optional-email;optional-password`，不写入 `data/accounts.json` |
+| `BROWSER_POOL_SIZE` | 浏览器池中的无头浏览器实例数量，默认 `1` |
+| `BROWSER_STREAM_TIMEOUT_SECONDS` | 浏览器驱动流式请求的超时时间，默认 `1800` |
+| `MAX_INFLIGHT_PER_ACCOUNT` | 单个千问账号的最大并发请求数，默认 `2` |
+| `CHAT_ID_PREWARM_TARGET_PER_ACCOUNT` | 每个账号预创建的千问 Web 会话数量，默认 `5` |
+| `CHAT_ID_PREWARM_TTL_SECONDS` / `CHAT_ID_PREWARM_MAX_CONCURRENCY` | `Chat_ID` 预热池的 TTL 与最大并发，默认 `120` / `16` |
 | `KEEPALIVE_URL`、`KEEPALIVE_INTERVAL` | 可选后台保活任务；环境变量存在时会锁定 WebUI 中对应配置 |
 | `TOOL_RECOVERY_MAX_ATTEMPTS` | 工具结果之后上游没有产出下一次客户端工具调用时的自动恢复尝试次数；默认 `4`，限制在 `1`-`8` |
 | `HOST_DATA_DIR`、`HOST_LOGS_DIR` | Docker 宿主机挂载路径，默认 `./data` 和 `./logs` |
@@ -200,13 +208,14 @@ flowchart LR
 - **Node.js**: `20+`
 - **npm**: 随 Node.js 安装
 - **Docker**: 仅在需要容器构建或容器部署时使用
+- **Playwright 浏览器**: 使用 `--install-browsers` 安装，或 `go run start-all.go --install-browsers`
 
-### 2. 本地开发
+### 2. 一键本地启动
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/YuJunZhiXue/qwen2API.git
-cd qwen2API
+git clone https://github.com/welcomemonth/web2api.git
+cd web2api
 
 # 2. 安装前端依赖
 cd frontend
@@ -227,7 +236,7 @@ go run start-all.go
 ```powershell
 cd backend
 go test ./...
-go build -trimpath -ldflags="-s -w" -o ..\bin\qwen2api-backend.exe .
+go build -trimpath -ldflags="-s -w" -o ..\bin\web2api-backend.exe .
 ```
 
 5. 修改前端代码后执行：
@@ -247,12 +256,12 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml build
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d
 
 # 查看日志
-docker compose logs -f qwen2api
+docker compose logs -f web2api
 ```
 
 ### 5. 开发规范
 
-- 🧩 **模块化开发**: 协议适配、账号池、文件上下文、图片/视频能力和 WebUI 组件应保持边界清晰。
+- 🧩 **模块化开发**: 协议适配、账号池、浏览器引擎、文件上下文、图片/视频能力和 WebUI 组件应保持边界清晰。
 - 🔄 **提交流程**: 小步修改 → 本地验证 → 提交 PR，避免把无关清理、功能改动和格式化混在一起。
 - 📚 **文档更新**: 新增用户可见配置、Docker 参数、接口能力或部署方式时，同步更新 README 和 `.env.example`。
 - 🔐 **安全边界**: 不要提交 `data/`、`logs/`、`.env`、真实 token、Cookie、密码或下游 API Key。
@@ -262,22 +271,21 @@ docker compose logs -f qwen2api
 
 ### 1. 贡献方式
 
-- 🐛 [报告 Bug](https://github.com/YuJunZhiXue/qwen2API/issues)
-- 💡 [功能建议](https://github.com/YuJunZhiXue/qwen2API/issues)
-- 🔧 [提交代码](https://github.com/YuJunZhiXue/qwen2API/pulls)
-- 💬 [Telegram 交流](https://t.me/qwen2api)
+- 🐛 [报告 Bug](https://github.com/welcomemonth/web2api/issues)
+- 💡 [功能建议](https://github.com/welcomemonth/web2api/issues)
+- 🔧 [提交代码](https://github.com/welcomemonth/web2api/pulls)
 
 ### 2. 贡献列表
 
-感谢所有帮助改进 qwen2API 的贡献者。
+感谢所有帮助改进 web2api 的贡献者。
 
-[![Contributors](https://contrib.rocks/image?repo=YuJunZhiXue/qwen2API)](https://github.com/YuJunZhiXue/qwen2API/graphs/contributors)
+[![Contributors](https://contrib.rocks/image?repo=welcomemonth/web2api)](https://github.com/welcomemonth/web2api/graphs/contributors)
 
 ## 六、其他信息
 
 ### 1. Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=YuJunZhiXue/qwen2API&type=Timeline)](https://www.star-history.com/#YuJunZhiXue/qwen2API&Timeline)
+[![Star History Chart](https://api.star-history.com/svg?repos=welcomemonth/web2api&type=Timeline)](https://www.star-history.com/#welcomemonth/web2api&Timeline)
 
 ### 2. 开源协议
 
@@ -305,11 +313,12 @@ docker compose logs -f qwen2api
 
 ### 4. 特别鸣谢
 
+- 特别鸣谢: [qwen2API](https://github.com/YuJunZhiXue/qwen2API) — 本项目基于 qwen2API 二次开发，感谢 [YuJunZhiXue](https://github.com/YuJunZhiXue) 及所有 qwen2API 贡献者。
 - 特别鸣谢: [LinuxDo](https://linux.do/)
 
 ---
 
 <div align="center">
-  <p>如果 qwen2API 对你有帮助，可以考虑给项目一个 Star。</p>
-  <p>由 <a href="https://github.com/YuJunZhiXue">YuJunZhiXue</a> 和贡献者共同维护。</p>
+  <p>如果 web2api 对你有帮助，可以考虑给项目一个 Star。</p>
+  <p>由 <a href="https://github.com/welcomemonth">welcomemonth</a> 维护，基于 <a href="https://github.com/YuJunZhiXue/qwen2API">qwen2API</a>（原作者 <a href="https://github.com/YuJunZhiXue">YuJunZhiXue</a>）。</p>
 </div>
