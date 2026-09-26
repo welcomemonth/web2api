@@ -232,10 +232,10 @@ func buildWorkspaceNotice(workspaceRoot string) string {
 }
 
 func deriveWorkspaceRoot(payload map[string]any) string {
-	if explicit := strings.TrimSpace(utils.AnyString(payload["_workspace_root"], "")); explicit != "" {
+	if explicit := strings.TrimSpace(anyString(payload["_workspace_root"], "")); explicit != "" {
 		return normalizeWorkspacePath(explicit)
 	}
-	if explicit := strings.TrimSpace(utils.AnyString(payload["workspace_root"], "")); explicit != "" {
+	if explicit := strings.TrimSpace(anyString(payload["workspace_root"], "")); explicit != "" {
 		return normalizeWorkspacePath(explicit)
 	}
 	texts := payloadTextFragments(payload)
@@ -269,7 +269,7 @@ func payloadTextFragments(payload map[string]any) []string {
 	if system := payload["system"]; system != nil {
 		out = append(out, flattenContentText(system))
 	}
-	for _, raw := range utils.AnyList(payload["messages"]) {
+	for _, raw := range anyList(payload["messages"]) {
 		msg, ok := raw.(map[string]any)
 		if !ok {
 			continue
@@ -381,13 +381,13 @@ func injectWorkspaceNotice(payload map[string]any, workspaceRoot string) map[str
 	if notice == "" {
 		return payload
 	}
-	messages := utils.AnyList(payload["messages"])
+	messages := anyList(payload["messages"])
 	for _, raw := range messages {
 		msg, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		if role := utils.StringValue(msg, "role", ""); role != "system" && role != "developer" {
+		if role := stringValue(msg, "role", ""); role != "system" && role != "developer" {
 			continue
 		}
 		text := flattenContentText(msg["content"])
@@ -397,7 +397,7 @@ func injectWorkspaceNotice(payload map[string]any, workspaceRoot string) map[str
 	}
 	rewritten := utils.DeepCopyMap(payload)
 	prefixed := []any{map[string]any{"role": "system", "content": notice}}
-	prefixed = append(prefixed, utils.AnyList(rewritten["messages"])...)
+	prefixed = append(prefixed, anyList(rewritten["messages"])...)
 	rewritten["messages"] = prefixed
 	return rewritten
 }
@@ -430,9 +430,9 @@ func flattenContentText(content any) string {
 					parts = append(parts, x)
 				}
 			case map[string]any:
-				switch utils.StringValue(x, "type", "") {
+				switch stringValue(x, "type", "") {
 				case "text", "input_text", "output_text":
-					if text := utils.StringValue(x, "text", ""); strings.TrimSpace(text) != "" {
+					if text := stringValue(x, "text", ""); strings.TrimSpace(text) != "" {
 						parts = append(parts, text)
 					}
 				case "tool_result", "function_call_output":
@@ -467,7 +467,7 @@ func (app *App) saveLocalBytes(filename, contentType string, raw []byte, source,
 	if base == "." || base == string(filepath.Separator) || base == "" {
 		base = "attachment.bin"
 	}
-	id := "file-" + utils.RandomID()[:24]
+	id := "file-" + randomID()[:24]
 	path := filepath.Join(app.settings.ContextGeneratedDir, id+"-"+base)
 	if err := os.WriteFile(path, raw, 0o644); err != nil {
 		return UploadedLocalFileRecord{}, err
@@ -610,23 +610,23 @@ func decodeDataURI(uri string) (string, []byte, error) {
 }
 
 func extractInlineFilePayload(block map[string]any) (string, string, []byte, bool, error) {
-	filename := firstNonEmpty(utils.StringValue(block, "filename", ""), utils.StringValue(block, "name", ""), "attachment.txt")
-	contentType := firstNonEmpty(utils.StringValue(block, "mime_type", ""), utils.StringValue(block, "content_type", ""), "text/plain")
-	if text := utils.StringValue(block, "text", ""); text != "" {
+	filename := firstNonEmpty(stringValue(block, "filename", ""), stringValue(block, "name", ""), "attachment.txt")
+	contentType := firstNonEmpty(stringValue(block, "mime_type", ""), stringValue(block, "content_type", ""), "text/plain")
+	if text := stringValue(block, "text", ""); text != "" {
 		return filename, contentType, []byte(text), true, nil
 	}
-	if content := utils.StringValue(block, "content", ""); content != "" && !strings.HasPrefix(strings.TrimSpace(content), "data:") {
+	if content := stringValue(block, "content", ""); content != "" && !strings.HasPrefix(strings.TrimSpace(content), "data:") {
 		return filename, contentType, []byte(content), true, nil
 	}
-	if encoded := utils.StringValue(block, "data_base64", ""); encoded != "" {
+	if encoded := stringValue(block, "data_base64", ""); encoded != "" {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		return filename, contentType, raw, true, err
 	}
-	if encoded := utils.StringValue(block, "data", ""); encoded != "" {
+	if encoded := stringValue(block, "data", ""); encoded != "" {
 		raw, err := base64.StdEncoding.DecodeString(encoded)
 		return filename, contentType, raw, true, err
 	}
-	if content := utils.StringValue(block, "content", ""); strings.HasPrefix(strings.TrimSpace(content), "data:") {
+	if content := stringValue(block, "content", ""); strings.HasPrefix(strings.TrimSpace(content), "data:") {
 		decodedType, raw, err := decodeDataURI(content)
 		if err != nil {
 			return "", "", nil, true, err
@@ -639,7 +639,7 @@ func extractInlineFilePayload(block map[string]any) (string, string, []byte, boo
 func (app *App) preprocessAttachments(payload map[string]any, ownerToken string) (PreprocessedAttachments, error) {
 	rewritten := utils.DeepCopyMap(payload)
 	out := PreprocessedAttachments{Payload: rewritten}
-	for msgIndex, rawMsg := range utils.AnyList(rewritten["messages"]) {
+	for msgIndex, rawMsg := range anyList(rewritten["messages"]) {
 		msg, ok := rawMsg.(map[string]any)
 		if !ok {
 			continue
@@ -653,11 +653,11 @@ func (app *App) preprocessAttachments(payload map[string]any, ownerToken string)
 			if !ok {
 				continue
 			}
-			partType := utils.StringValue(part, "type", "")
+			partType := stringValue(part, "type", "")
 			switch partType {
 			case "image_url":
 				imageURL, _ := part["image_url"].(map[string]any)
-				urlText := strings.TrimSpace(utils.AnyString(firstNonNil(imageURL["url"], part["url"]), ""))
+				urlText := strings.TrimSpace(anyString(firstNonNil(imageURL["url"], part["url"]), ""))
 				if !strings.HasPrefix(urlText, "data:") {
 					continue
 				}
@@ -681,7 +681,7 @@ func (app *App) preprocessAttachments(payload map[string]any, ownerToken string)
 				})
 				contentList[partIndex] = map[string]any{"type": "input_image", "file_id": record.ID, "mime_type": contentType, "filename": record.Filename}
 			case "input_file", "file":
-				if existingFileID := strings.TrimSpace(utils.AnyString(part["file_id"], "")); existingFileID != "" {
+				if existingFileID := strings.TrimSpace(anyString(part["file_id"], "")); existingFileID != "" {
 					record, err := app.getUploadedLocalFile(existingFileID, ownerToken)
 					if err != nil {
 						return PreprocessedAttachments{}, err
@@ -735,7 +735,7 @@ func (app *App) preprocessAttachments(payload map[string]any, ownerToken string)
 			}
 		}
 		msg["content"] = contentList
-		anyListValue := utils.AnyList(rewritten["messages"])
+		anyListValue := anyList(rewritten["messages"])
 		anyListValue[msgIndex] = msg
 		rewritten["messages"] = anyListValue
 	}
@@ -752,7 +752,7 @@ func estimatePromptLen(messages []any, tools []map[string]any, clientProfile str
 		total += len(flattenContentText(msg["content"])) + 24
 	}
 	for _, tool := range tools {
-		total += len(utils.StringValue(tool, "name", "")) + len(utils.StringValue(tool, "description", ""))
+		total += len(stringValue(tool, "name", "")) + len(stringValue(tool, "description", ""))
 	}
 	if clientProfile == clientProfileClaudeCode {
 		total += 512
@@ -779,7 +779,7 @@ func planContextOffload(settings Settings, messages []any, tools []map[string]an
 	latestUserText := ""
 	for i := len(messages) - 1; i >= 0; i-- {
 		msg, ok := messages[i].(map[string]any)
-		if !ok || utils.StringValue(msg, "role", "") != "user" {
+		if !ok || stringValue(msg, "role", "") != "user" {
 			continue
 		}
 		latestUserText = flattenContentText(msg["content"])
@@ -799,7 +799,7 @@ func planContextOffload(settings Settings, messages []any, tools []map[string]an
 		if text == "" {
 			continue
 		}
-		serialized = append(serialized, fmt.Sprintf("## Message %d [%s]\n%s\n", idx+1, firstNonEmpty(utils.StringValue(msg, "role", ""), "unknown"), text))
+		serialized = append(serialized, fmt.Sprintf("## Message %d [%s]\n%s\n", idx+1, firstNonEmpty(stringValue(msg, "role", ""), "unknown"), text))
 	}
 	attachmentText := strings.TrimSpace(strings.Join(serialized, "\n"))
 	if attachmentText == "" {
@@ -819,28 +819,28 @@ func planContextOffload(settings Settings, messages []any, tools []map[string]an
 		Mode:               mode,
 		InlineMessages:     []any{map[string]any{"role": "user", "content": rewrittenText}},
 		GeneratedFiles:     []LocalContextFile{makeContextFile(attachmentText)},
-		SummaryText:        utils.Trim(attachmentText, 1200),
+		SummaryText:        trim(attachmentText, 1200),
 		EstimatedPromptLen: estimated,
 		Note:               systemContextPromptNote,
 	}
 }
 
 func deriveSessionKey(surface, authToken string, payload map[string]any) string {
-	if explicit := strings.TrimSpace(utils.AnyString(payload["session_key"], "")); explicit != "" {
+	if explicit := strings.TrimSpace(anyString(payload["session_key"], "")); explicit != "" {
 		return explicit
 	}
-	if explicit := strings.TrimSpace(utils.AnyString(payload["conversation_id"], "")); explicit != "" {
+	if explicit := strings.TrimSpace(anyString(payload["conversation_id"], "")); explicit != "" {
 		return explicit
 	}
 	if meta, ok := payload["metadata"].(map[string]any); ok {
-		if explicit := strings.TrimSpace(utils.AnyString(meta["conversation_id"], "")); explicit != "" {
+		if explicit := strings.TrimSpace(anyString(meta["conversation_id"], "")); explicit != "" {
 			return explicit
 		}
 	}
 	firstUserText := ""
-	for _, raw := range utils.AnyList(payload["messages"]) {
+	for _, raw := range anyList(payload["messages"]) {
 		msg, ok := raw.(map[string]any)
-		if !ok || utils.StringValue(msg, "role", "") != "user" {
+		if !ok || stringValue(msg, "role", "") != "user" {
 			continue
 		}
 		firstUserText = flattenContentText(msg["content"])
@@ -848,7 +848,7 @@ func deriveSessionKey(surface, authToken string, payload map[string]any) string 
 			break
 		}
 	}
-	sum := sha256.Sum256([]byte(surface + "::" + authToken + "::" + utils.AnyString(payload["model"], "") + "::" + utils.Trim(firstUserText, 400)))
+	sum := sha256.Sum256([]byte(surface + "::" + authToken + "::" + anyString(payload["model"], "") + "::" + trim(firstUserText, 400)))
 	return hex.EncodeToString(sum[:])[:24]
 }
 
@@ -890,7 +890,7 @@ func dedupeUpstreamFiles(files []map[string]any) []map[string]any {
 	seen := map[string]bool{}
 	out := make([]map[string]any, 0, len(files))
 	for _, file := range files {
-		key := firstNonEmpty(utils.AnyString(file["id"], ""), utils.AnyString(file["url"], ""), mustJSON(file))
+		key := firstNonEmpty(anyString(file["id"], ""), anyString(file["url"], ""), mustJSON(file))
 		if key == "" || seen[key] {
 			continue
 		}
@@ -951,24 +951,24 @@ func (app *App) uploadLocalFileToUpstream(ctx context.Context, acc *Account, loc
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("getstsToken failed: %d %s", status, utils.Truncate(text, 200))
+		return nil, fmt.Errorf("getstsToken failed: %d %s", status, truncate(text, 200))
 	}
 	var stsPayload map[string]any
 	if err := json.Unmarshal([]byte(text), &stsPayload); err != nil {
 		return nil, err
 	}
 	stsData, _ := stsPayload["data"].(map[string]any)
-	fileID := utils.AnyString(stsData["file_id"], "")
-	filePathRemote := utils.AnyString(stsData["file_path"], "")
-	bucketName := utils.AnyString(stsData["bucketname"], "")
-	endpoint := strings.TrimPrefix(strings.TrimSpace(utils.AnyString(stsData["endpoint"], "")), "https://")
+	fileID := anyString(stsData["file_id"], "")
+	filePathRemote := anyString(stsData["file_path"], "")
+	bucketName := anyString(stsData["bucketname"], "")
+	endpoint := strings.TrimPrefix(strings.TrimSpace(anyString(stsData["endpoint"], "")), "https://")
 	endpoint = strings.TrimPrefix(endpoint, "http://")
-	region := normalizeSignRegion(utils.AnyString(stsData["region"], ""))
-	accessKeyID := utils.AnyString(stsData["access_key_id"], "")
-	accessKeySecret := utils.AnyString(stsData["access_key_secret"], "")
-	securityToken := utils.AnyString(stsData["security_token"], "")
+	region := normalizeSignRegion(anyString(stsData["region"], ""))
+	accessKeyID := anyString(stsData["access_key_id"], "")
+	accessKeySecret := anyString(stsData["access_key_secret"], "")
+	securityToken := anyString(stsData["security_token"], "")
 	if fileID == "" || filePathRemote == "" || bucketName == "" || endpoint == "" || accessKeyID == "" || accessKeySecret == "" {
-		return nil, fmt.Errorf("getstsToken missing required fields: %s", utils.Truncate(text, 200))
+		return nil, fmt.Errorf("getstsToken missing required fields: %s", truncate(text, 200))
 	}
 
 	clientOptions := []oss.ClientOption{
@@ -995,7 +995,7 @@ func (app *App) uploadLocalFileToUpstream(ctx context.Context, acc *Account, loc
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("files/parse failed: %d %s", status, utils.Truncate(text, 200))
+		return nil, fmt.Errorf("files/parse failed: %d %s", status, truncate(text, 200))
 	}
 
 	deadline := time.Now().Add(time.Duration(maxInt(app.settings.ContextUploadParseTimeoutSeconds, 1)) * time.Second)
@@ -1006,23 +1006,23 @@ func (app *App) uploadLocalFileToUpstream(ctx context.Context, acc *Account, loc
 			return nil, err
 		}
 		if status != http.StatusOK {
-			return nil, fmt.Errorf("files/parse/status failed: %d %s", status, utils.Truncate(text, 200))
+			return nil, fmt.Errorf("files/parse/status failed: %d %s", status, truncate(text, 200))
 		}
 		var payload map[string]any
 		if err := json.Unmarshal([]byte(text), &payload); err != nil {
 			return nil, err
 		}
-		rows := utils.AnyList(payload["data"])
+		rows := anyList(payload["data"])
 		row := map[string]any{}
 		if len(rows) > 0 {
 			row, _ = rows[0].(map[string]any)
 		}
-		parseStatus = utils.AnyString(row["status"], "pending")
+		parseStatus = anyString(row["status"], "pending")
 		if parseStatus == "success" {
 			break
 		}
 		if parseStatus == "failed" || parseStatus == "error" {
-			return nil, fmt.Errorf("file parse failed: %s", utils.Truncate(mustJSON(row), 200))
+			return nil, fmt.Errorf("file parse failed: %s", truncate(mustJSON(row), 200))
 		}
 		select {
 		case <-ctx.Done():
@@ -1066,11 +1066,11 @@ func (app *App) uploadLocalFileToUpstream(ctx context.Context, acc *Account, loc
 		"greenNet":        "success",
 		"size":            len(raw),
 		"error":           "",
-		"itemId":          utils.RandomID(),
+		"itemId":          randomID(),
 		"file_type":       contentType,
 		"showType":        "file",
 		"file_class":      upstreamFileClass(contentType),
-		"uploadTaskId":    utils.RandomID(),
+		"uploadTaskId":    randomID(),
 	}
 	return map[string]any{
 		"remote_file_id":    fileID,
@@ -1099,10 +1099,10 @@ func (app *App) prepareContextAttachments(ctx context.Context, payload map[strin
 	if err != nil {
 		return PreparedRequestContext{}, err
 	}
-	plan := planContextOffload(app.settings, utils.AnyList(payload["messages"]), tools, clientProfile)
+	plan := planContextOffload(app.settings, anyList(payload["messages"]), tools, clientProfile)
 	useGeneratedContextFiles := len(plan.GeneratedFiles) > 0 && len(tools) == 0
 	upstreamFiles := []map[string]any{}
-	for _, raw := range utils.AnyList(payload["upstream_files"]) {
+	for _, raw := range anyList(payload["upstream_files"]) {
 		if item, ok := raw.(map[string]any); ok {
 			upstreamFiles = append(upstreamFiles, item)
 		}
@@ -1332,17 +1332,17 @@ func (app *App) rewriteCachedFileHints(payload map[string]any, authToken string)
 		return payload
 	}
 	rewritten := utils.DeepCopyMap(payload)
-	refs := collectToolCallRefs(utils.AnyList(rewritten["messages"]))
-	messages := utils.AnyList(rewritten["messages"])
+	refs := collectToolCallRefs(anyList(rewritten["messages"]))
+	messages := anyList(rewritten["messages"])
 	changed := false
 	for idx, raw := range messages {
 		msg, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		role := utils.StringValue(msg, "role", "")
+		role := stringValue(msg, "role", "")
 		if role == "tool" {
-			ref := refs[utils.StringValue(msg, "tool_call_id", "")]
+			ref := refs[stringValue(msg, "tool_call_id", "")]
 			if !isReadLikeToolName(ref.Name) || strings.TrimSpace(ref.FilePath) == "" {
 				continue
 			}
@@ -1368,11 +1368,11 @@ func (app *App) rewriteCachedFileHints(payload map[string]any, authToken string)
 			if !ok {
 				continue
 			}
-			partType := utils.StringValue(part, "type", "")
+			partType := stringValue(part, "type", "")
 			if partType != "tool_result" && partType != "function_call_output" {
 				continue
 			}
-			ref := refs[firstNonEmpty(utils.AnyString(part["tool_use_id"], ""), utils.AnyString(part["call_id"], ""), utils.AnyString(part["id"], ""))]
+			ref := refs[firstNonEmpty(anyString(part["tool_use_id"], ""), anyString(part["call_id"], ""), anyString(part["id"], ""))]
 			if !isReadLikeToolName(ref.Name) || strings.TrimSpace(ref.FilePath) == "" {
 				continue
 			}
@@ -1403,29 +1403,29 @@ func collectToolCallRefs(messages []any) map[string]toolCallRef {
 	refs := map[string]toolCallRef{}
 	for _, raw := range messages {
 		msg, ok := raw.(map[string]any)
-		if !ok || utils.StringValue(msg, "role", "") != "assistant" {
+		if !ok || stringValue(msg, "role", "") != "assistant" {
 			continue
 		}
-		for _, rawCall := range utils.AnyList(msg["tool_calls"]) {
+		for _, rawCall := range anyList(msg["tool_calls"]) {
 			call, ok := rawCall.(map[string]any)
 			if !ok {
 				continue
 			}
-			callID := utils.AnyString(call["id"], "")
+			callID := anyString(call["id"], "")
 			fn, _ := call["function"].(map[string]any)
-			name := utils.AnyString(fn["name"], "")
+			name := anyString(fn["name"], "")
 			filePath := extractToolFilePathFromAny(fn["arguments"])
 			if callID != "" {
 				refs[callID] = toolCallRef{Name: name, FilePath: filePath}
 			}
 		}
-		for _, rawPart := range utils.AnyList(msg["content"]) {
+		for _, rawPart := range anyList(msg["content"]) {
 			part, ok := rawPart.(map[string]any)
-			if !ok || utils.StringValue(part, "type", "") != "tool_use" {
+			if !ok || stringValue(part, "type", "") != "tool_use" {
 				continue
 			}
-			callID := firstNonEmpty(utils.AnyString(part["id"], ""), utils.AnyString(part["tool_use_id"], ""))
-			name := utils.AnyString(part["name"], "")
+			callID := firstNonEmpty(anyString(part["id"], ""), anyString(part["tool_use_id"], ""))
+			name := anyString(part["name"], "")
 			filePath := extractToolFilePathFromAny(part["input"])
 			if callID != "" {
 				refs[callID] = toolCallRef{Name: name, FilePath: filePath}
@@ -1451,7 +1451,7 @@ func extractToolFilePathFromAny(value any) string {
 		return trimmed
 	case map[string]any:
 		for _, key := range []string{"file_path", "path", "filepath", "filename"} {
-			if path := strings.TrimSpace(utils.AnyString(v[key], "")); path != "" {
+			if path := strings.TrimSpace(anyString(v[key], "")); path != "" {
 				return path
 			}
 		}
