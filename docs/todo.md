@@ -120,11 +120,11 @@
   - [x] **TASK-013-S03** 支持更新账号；**依赖：TASK-013**
   - [x] **TASK-013-S04** 支持删除账号；**依赖：TASK-013**
 
-- [ ] **TASK-014** 实现 API Key Repository；**依赖：TASK-011、TASK-009**
-  - [ ] **TASK-014-S01** 支持加载全部 API Key 到内存；**依赖：TASK-014**
-  - [ ] **TASK-014-S02** 支持新增 API Key；**依赖：TASK-014**
-  - [ ] **TASK-014-S03** 支持更新 API Key 状态；**依赖：TASK-014**
-  - [ ] **TASK-014-S04** 支持删除 API Key；**依赖：TASK-014**
+- [x] **TASK-014** 实现 API Key Repository；**依赖：TASK-011、TASK-009**
+  - [x] **TASK-014-S01** 支持加载全部 API Key 到内存；**依赖：TASK-014**
+  - [x] **TASK-014-S02** 支持新增 API Key；**依赖：TASK-014**
+  - [x] **TASK-014-S03** 支持更新 API Key 状态；**依赖：TASK-014**
+  - [x] **TASK-014-S04** 支持删除 API Key；**依赖：TASK-014**
 
 <!-- - [ ] **TASK-015** 实现 API Log Repository；**依赖：TASK-011、TASK-010**
   - [ ] **TASK-015-S01** 支持追加 API 调用日志；**依赖：TASK-015**
