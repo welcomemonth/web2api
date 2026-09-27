@@ -42,6 +42,7 @@ func (app *App) Routes() *gin.Engine {
 	app.registerAppHeartbeatRouter(app.engine)
 	app.registerOpenAIRouter(app.engine)
 	app.registerAnthropicRouter(app.engine)
+	app.registerAdminRouter(app.engine)
 	return app.engine
 }
 

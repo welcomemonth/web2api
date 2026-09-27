@@ -52,3 +52,45 @@ func bearerToken(header string) (string, bool) {
 func abortUnauthorized(c *gin.Context, message string) {
 	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": message})
 }
+
+func AuthAdmin(c *gin.Context) {
+	var token string
+	// 1. 优先从 Authorization Header 获取 Bearer Token
+	auth := c.GetHeader("Authorization")
+	if strings.HasPrefix(auth, "Bearer ") {
+		token = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+	}
+	// 2. 如果没有，从 x-api-key Header 获取
+	if token == "" {
+		if apiKey := strings.TrimSpace(c.GetHeader("x-api-key")); apiKey != "" {
+			token = apiKey
+		}
+	}
+	// 3. 如果还没有，从 URL Query 参数 "key" 获取
+	if token == "" {
+		if key := strings.TrimSpace(c.Query("key")); key != "" {
+			token = key
+		}
+	}
+	// 4. 最后，从 URL Query 参数 "api_key" 获取
+	if token == "" {
+		token = strings.TrimSpace(c.Query("api_key"))
+	}
+
+	// 如果最终没有提取到 token，说明鉴权失败
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": "missing or invalid authorization token",
+		})
+		c.Abort()
+		return
+	}
+
+	// TODO: 在这里添加验证 token和apiKey 是否有效的逻辑（例如查数据库、校验 JWT 等）
+	// if !isValid(token) { ... c.Abort() ... }
+
+	// 鉴权成功：将 token 存入 Gin 的 Context 中，供后续的 Handler 使用
+	c.Set("admin_token", token)
+
+	c.Next()
+}
