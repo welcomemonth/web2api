@@ -164,11 +164,11 @@
   - [x] **TASK-019-S02** 登录成功后生成 JWT；**依赖：TASK-019**
   - [x] **TASK-019-S03** 登录失败返回统一认证错误；**依赖：TASK-019**
 
-- [ ] **TASK-020** 实现管理员 JWT Middleware；**依赖：TASK-018**
-  - [ ] **TASK-020-S01** 从 `Authorization: Bearer <JWT>` 获取 Token；**依赖：TASK-020**
-  - [ ] **TASK-020-S02** 校验 JWT；**依赖：TASK-020**
-  - [ ] **TASK-020-S03** 无 Token 返回 401；**依赖：TASK-020**
-  - [ ] **TASK-020-S04** Token 无效或过期返回 401；**依赖：TASK-020**
+- [x] **TASK-020** 实现管理员 JWT Middleware；**依赖：TASK-018**
+  - [x] **TASK-020-S01** 从 `Authorization: Bearer <JWT>` 获取 Token；**依赖：TASK-020**
+  - [x] **TASK-020-S02** 校验 JWT；**依赖：TASK-020**
+  - [x] **TASK-020-S03** 无 Token 返回 401；**依赖：TASK-020**
+  - [x] **TASK-020-S04** Token 无效或过期返回 401；**依赖：TASK-020**
 
 - [ ] **TASK-021** 实现管理员登录 API；**依赖：TASK-019**
   - [ ] **TASK-021-S01** 注册 `POST /admin/login`；**依赖：TASK-021**
