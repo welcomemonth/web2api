@@ -48,19 +48,32 @@ func (r *AdminRepository) Save(a *model.Admin) error {
 	return nil
 }
 
+// Load 从 admin.json 加载管理员到内存。
+// 文件不存在不算错误：内存保持未初始化（Get 返回 nil），
+// 由初始化服务（TASK-017）决定是否创建默认管理员。
+func (r *AdminRepository) Load() error {
+	a, err := r.store.Load()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	r.mu.Lock()
+	r.admin = &a
+	r.mu.Unlock()
+	return nil
+}
+
 // EnsureAdmin 首次启动时初始化管理员：
-// admin.json 已存在则读取并缓存；不存在则用 defaultAdmin 创建并落盘。
+// 已加载到内存则直接返回；否则用 defaultAdmin 创建并落盘。
 // 损坏等其它错误原样返回，不做静默覆盖。
 func (r *AdminRepository) EnsureAdmin(defaultAdmin *model.Admin) (*model.Admin, error) {
-	a, err := r.store.Load()
-	if err == nil {
-		r.mu.Lock()
-		r.admin = &a
-		r.mu.Unlock()
-		return r.Get(), nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
+	if err := r.Load(); err != nil {
 		return nil, err
+	}
+	if a := r.Get(); a != nil {
+		return a, nil
 	}
 	if err := r.Save(defaultAdmin); err != nil {
 		return nil, err
