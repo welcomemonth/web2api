@@ -82,11 +82,11 @@
   - [x] **TASK-007-S02** 定义管理员密码字段；**依赖：TASK-007**
   - [x] **TASK-007-S03** 保持第一版明文存储约定；**依赖：TASK-007**
 
-- [ ] **TASK-008** 定义 Qwen Account 数据模型；**依赖：TASK-006**
-  - [ ] **TASK-008-S01** 定义账号 ID、Username、Password、Access Token、创建时间等持久化字段；**依赖：TASK-008**
-  - [ ] **TASK-008-S02** 定义持久化状态 `normal/error/disabled`；**依赖：TASK-008**
-  - [ ] **TASK-008-S03** 明确 `busy/idle` 为运行时状态，不写入 JSON；**依赖：TASK-008**
-  - [ ] **TASK-008-S04** 为运行时对象预留 Browser Context、busy 状态和当前请求 ID；**依赖：TASK-008**
+- [x] **TASK-008** 定义 Qwen Account 数据模型；**依赖：TASK-006**
+  - [x] **TASK-008-S01** 定义账号 ID、Username、Password、Access Token、创建时间等持久化字段；**依赖：TASK-008**
+  - [x] **TASK-008-S02** 定义持久化状态 `normal/error/disabled`；**依赖：TASK-008**
+  - [x] **TASK-008-S03** 明确 `busy/idle` 为运行时状态，不写入 JSON；**依赖：TASK-008**
+  - [x] **TASK-008-S04** 为运行时对象预留 Browser Context、busy 状态和当前请求 ID；**依赖：TASK-008**
 
 - [ ] **TASK-009** 定义 API Key 数据模型；**依赖：TASK-006**
   - [ ] **TASK-009-S01** 定义 Key ID、名称、Key、状态、创建时间字段；**依赖：TASK-009**
