@@ -152,12 +152,12 @@
 
 ## 3.2 JWT
 
-- [ ] **TASK-018** 实现 JWT Token 生成与校验；**依赖：TASK-017**
-  - [ ] **TASK-018-S01** 定义 JWT Claims；**依赖：TASK-018**
-  - [ ] **TASK-018-S02** 设置 24 小时有效期；**依赖：TASK-018**
-  - [ ] **TASK-018-S03** 实现 Token 签发；**依赖：TASK-018**
-  - [ ] **TASK-018-S04** 实现 Token 校验和过期判断；**依赖：TASK-018**
-  - [ ] **TASK-018-S05** 第一版不实现 Refresh Token 和黑名单；**依赖：TASK-018**
+- [x] **TASK-018** 实现 JWT Token 生成与校验；**依赖：TASK-017**
+  - [x] **TASK-018-S01** 定义 JWT Claims；**依赖：TASK-018**
+  - [x] **TASK-018-S02** 设置 24 小时有效期；**依赖：TASK-018**
+  - [x] **TASK-018-S03** 实现 Token 签发；**依赖：TASK-018**
+  - [x] **TASK-018-S04** 实现 Token 校验和过期判断；**依赖：TASK-018**
+  - [x] **TASK-018-S05** 第一版不实现 Refresh Token 和黑名单；**依赖：TASK-018**
 
 - [ ] **TASK-019** 实现管理员认证 Service；**依赖：TASK-012、TASK-018**
   - [ ] **TASK-019-S01** 实现用户名密码校验；**依赖：TASK-019**

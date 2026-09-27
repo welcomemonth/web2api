@@ -32,3 +32,6 @@ web/.playwright/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Claude Code 本地配置（含个人提示音等，不提交）
+.claude/
