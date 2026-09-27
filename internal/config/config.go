@@ -23,6 +23,8 @@ type Config struct {
 	// JWTExpiry 管理员 JWT 有效期。
 	JWTExpiry time.Duration
 	// APIRateLimitRPM 每个 API Key 每分钟最大请求数（第一版固定值）。
+	LogLevel        string
+	IsProd          bool
 	APIRateLimitRPM int
 	// AccountWaitTimeout 无空闲账号时请求的最长等待时间。
 	AccountWaitTimeout time.Duration
@@ -34,6 +36,8 @@ func Default() Config {
 	return Config{
 		Port:               8080,
 		DataDir:            "data",
+		IsProd:             false,
+		LogLevel:           "debug",
 		JWTSecret:          jwtSecret(),
 		JWTExpiry:          24 * time.Hour,
 		APIRateLimitRPM:    10,
