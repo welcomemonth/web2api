@@ -15,11 +15,11 @@
 
 ## 0. 任务约定
 
-- [ ] **TASK-000** 建立项目任务执行规则；**依赖：无**
-  - [ ] **TASK-000-S01** 所有任务完成后再勾选对应任务；**依赖：TASK-000**
-  - [ ] **TASK-000-S02** 每完成一个阶段至少执行一次完整测试；**依赖：TASK-000**
-  - [ ] **TASK-000-S03** 不在 MVP 中临时加入 PRD 未定义的大功能；**依赖：TASK-000**
-  - [ ] **TASK-000-S04** 如果实现过程中发现需求冲突，优先保持现有 API 链路和数据模型稳定；**依赖：TASK-000**
+- [x] **TASK-000** 建立项目任务执行规则；**依赖：无**
+  - [x] **TASK-000-S01** 所有任务完成后再勾选对应任务；**依赖：TASK-000**
+  - [x] **TASK-000-S02** 每完成一个阶段至少执行一次完整测试；**依赖：TASK-000**
+  - [x] **TASK-000-S03** 不在 MVP 中临时加入 PRD 未定义的大功能；**依赖：TASK-000**
+  - [x] **TASK-000-S04** 如果实现过程中发现需求冲突，优先保持现有 API 链路和数据模型稳定；**依赖：TASK-000**
 
 ---
 
@@ -27,33 +27,33 @@
 
 ## 1.1 项目骨架
 
-- [ ] **TASK-001** 创建 Web2API 项目根目录和基础工程结构；**依赖：TASK-000**
-  - [ ] **TASK-001-S01** 创建 `cmd/server` 目录并准备 `main.go`；**依赖：TASK-001**
-  - [ ] **TASK-001-S02** 创建 `internal/handler`、`service`、`repository`、`middleware`、`model`、`scheduler`、`provider`、`storage` 目录；**依赖：TASK-001**
-  - [ ] **TASK-001-S03** 创建 `web` 前端工程目录；**依赖：TASK-001**
-  - [ ] **TASK-001-S04** 创建 `data` 数据目录；**依赖：TASK-001**
-  - [ ] **TASK-001-S05** 创建 `.gitignore`，忽略运行数据、构建产物、浏览器缓存和本地敏感文件；**依赖：TASK-001**
+- [x] **TASK-001** 创建 Web2API 项目根目录和基础工程结构；**依赖：TASK-000**
+  - [x] **TASK-001-S01** 创建 `cmd/server` 目录并准备 `main.go`；**依赖：TASK-001**
+  - [x] **TASK-001-S02** 创建 `internal/handler`、`service`、`repository`、`middleware`、`model`、`scheduler`、`provider`、`storage` 目录；**依赖：TASK-001**
+  - [x] **TASK-001-S03** 创建 `web` 前端工程目录；**依赖：TASK-001**
+  - [x] **TASK-001-S04** 创建 `data` 数据目录；**依赖：TASK-001**
+  - [x] **TASK-001-S05** 创建 `.gitignore`，忽略运行数据、构建产物、浏览器缓存和本地敏感文件；**依赖：TASK-001**
 
-- [ ] **TASK-002** 初始化 Go Module 和后端依赖；**依赖：TASK-001**
-  - [ ] **TASK-002-S01** 初始化 `go.mod`；**依赖：TASK-002**
-  - [ ] **TASK-002-S02** 添加 Gin 依赖；**依赖：TASK-002**
-  - [ ] **TASK-002-S03** 添加 Playwright-Go 依赖；**依赖：TASK-002**
-  - [ ] **TASK-002-S04** 添加 JWT 实现所需依赖；**依赖：TASK-002**
-  - [ ] **TASK-002-S05** 执行 `go mod tidy` 并确认依赖可正常解析；**依赖：TASK-002**
+- [x] **TASK-002** 初始化 Go Module 和后端依赖；**依赖：TASK-001**
+  - [x] **TASK-002-S01** 初始化 `go.mod`；**依赖：TASK-002**
+  - [x] **TASK-002-S02** 添加 Gin 依赖；**依赖：TASK-002**
+  - [x] **TASK-002-S03** 添加 Playwright-Go 依赖；**依赖：TASK-002**
+  - [x] **TASK-002-S04** 添加 JWT 实现所需依赖；**依赖：TASK-002**
+  - [x] **TASK-002-S05** 执行 `go mod tidy` 并确认依赖可正常解析；**依赖：TASK-002**
 
-- [ ] **TASK-003** 初始化 React + Vite 前端工程；**依赖：TASK-001**
-  - [ ] **TASK-003-S01** 初始化 React + Vite 项目；**依赖：TASK-003**
-  - [ ] **TASK-003-S02** 配置开发服务器端口为 `5173`；**依赖：TASK-003**
-  - [ ] **TASK-003-S03** 配置前端请求开发阶段指向 Go `localhost:8080`；**依赖：TASK-003**
-  - [ ] **TASK-003-S04** 删除无关示例页面和默认模板代码；**依赖：TASK-003**
+- [x] **TASK-003** 初始化 React + Vite 前端工程；**依赖：TASK-001**
+  - [x] **TASK-003-S01** 初始化 React + Vite 项目；**依赖：TASK-003**
+  - [x] **TASK-003-S02** 配置开发服务器端口为 `5173`；**依赖：TASK-003**
+  - [x] **TASK-003-S03** 配置前端请求开发阶段指向 Go `localhost:8080`；**依赖：TASK-003**
+  - [x] **TASK-003-S04** 删除无关示例页面和默认模板代码；**依赖：TASK-003**
 
 ## 1.2 最小运行闭环
 
-- [ ] **TASK-004** 实现最小 Go HTTP 服务；**依赖：TASK-002**
-  - [ ] **TASK-004-S01** 创建 Gin Engine；**依赖：TASK-004**
-  - [ ] **TASK-004-S02** 配置 `localhost:8080` 监听；**依赖：TASK-004**
-  - [ ] **TASK-004-S03** 添加 `/health` 健康检查接口；**依赖：TASK-004**
-  - [ ] **TASK-004-S04** 验证服务启动和健康检查正常；**依赖：TASK-004**
+- [x] **TASK-004** 实现最小 Go HTTP 服务；**依赖：TASK-002**
+  - [x] **TASK-004-S01** 创建 Gin Engine；**依赖：TASK-004**
+  - [x] **TASK-004-S02** 配置 `localhost:8080` 监听；**依赖：TASK-004**
+  - [x] **TASK-004-S03** 添加 `/health` 健康检查接口；**依赖：TASK-004**
+  - [x] **TASK-004-S04** 验证服务启动和健康检查正常；**依赖：TASK-004**
 
 - [ ] **TASK-005** 完善基础 README 开发说明；**依赖：TASK-004、TASK-003**
   - [ ] **TASK-005-S01** 记录 Go 和 Node 环境要求；**依赖：TASK-005**

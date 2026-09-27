@@ -1,5 +1,20 @@
 package main
 
+import (
+	"log"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
 func main() {
-	// 占位：TASK-004 将实现 Gin 引擎与 /health 健康检查。
+	r := gin.Default()
+
+	r.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+
+	if err := r.Run(":8080"); err != nil {
+		log.Fatalf("启动服务失败: %v", err)
+	}
 }
