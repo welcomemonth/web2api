@@ -159,10 +159,10 @@
   - [x] **TASK-018-S04** 实现 Token 校验和过期判断；**依赖：TASK-018**
   - [x] **TASK-018-S05** 第一版不实现 Refresh Token 和黑名单；**依赖：TASK-018**
 
-- [ ] **TASK-019** 实现管理员认证 Service；**依赖：TASK-012、TASK-018**
-  - [ ] **TASK-019-S01** 实现用户名密码校验；**依赖：TASK-019**
-  - [ ] **TASK-019-S02** 登录成功后生成 JWT；**依赖：TASK-019**
-  - [ ] **TASK-019-S03** 登录失败返回统一认证错误；**依赖：TASK-019**
+- [x] **TASK-019** 实现管理员认证 Service；**依赖：TASK-012、TASK-018**
+  - [x] **TASK-019-S01** 实现用户名密码校验；**依赖：TASK-019**
+  - [x] **TASK-019-S02** 登录成功后生成 JWT；**依赖：TASK-019**
+  - [x] **TASK-019-S03** 登录失败返回统一认证错误；**依赖：TASK-019**
 
 - [ ] **TASK-020** 实现管理员 JWT Middleware；**依赖：TASK-018**
   - [ ] **TASK-020-S01** 从 `Authorization: Bearer <JWT>` 获取 Token；**依赖：TASK-020**
