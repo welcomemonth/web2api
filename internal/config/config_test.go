@@ -14,6 +14,9 @@ func TestDefault(t *testing.T) {
 	if cfg.DataDir != "data" {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "data")
 	}
+	if cfg.JWTSecret == "" {
+		t.Errorf("JWTSecret 不应为空")
+	}
 	if cfg.JWTExpiry != 24*time.Hour {
 		t.Errorf("JWTExpiry = %v, want 24h", cfg.JWTExpiry)
 	}
@@ -22,5 +25,13 @@ func TestDefault(t *testing.T) {
 	}
 	if cfg.AccountWaitTimeout != 30*time.Second {
 		t.Errorf("AccountWaitTimeout = %v, want 30s", cfg.AccountWaitTimeout)
+	}
+}
+
+func TestJWTSecretFromEnv(t *testing.T) {
+	t.Setenv(EnvJWTSecret, "from-env")
+
+	if got := Default().JWTSecret; got != "from-env" {
+		t.Errorf("JWTSecret = %q, want from-env", got)
 	}
 }
