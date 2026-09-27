@@ -39,8 +39,9 @@ func (app *App) Routes() *gin.Engine {
 	app.engine.MaxMultipartMemory = 50 << 20
 	app.engine.Static("/static", "./uploads")
 
-	// api := app.engine.Group("/api/v1")
-
+	app.registerAppHeartbeatRouter(app.engine)
+	app.registerOpenAIRouter(app.engine)
+	app.registerAnthropicRouter(app.engine)
 	return app.engine
 }
 
