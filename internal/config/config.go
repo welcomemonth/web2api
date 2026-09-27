@@ -28,6 +28,8 @@ type Config struct {
 	APIRateLimitRPM int
 	// AccountWaitTimeout 无空闲账号时请求的最长等待时间。
 	AccountWaitTimeout time.Duration
+
+	Version string
 }
 
 // Default 返回第一版 MVP 的默认配置。
@@ -42,6 +44,7 @@ func Default() Config {
 		JWTExpiry:          24 * time.Hour,
 		APIRateLimitRPM:    10,
 		AccountWaitTimeout: 30 * time.Second,
+		Version:            "1.0.0",
 	}
 }
 
