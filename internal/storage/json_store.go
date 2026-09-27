@@ -2,77 +2,78 @@ package storage
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
-// JSONStore 是针对单个 JSON 文件的通用持久化存储。
-// T 为落盘数据结构的类型。写操作通过互斥锁串行；读取依赖“临时文件 + rename”
-// 的原子替换，读到的是完整的新旧文件之一，而非半写状态。
-type JSONStore[T any] struct {
-	path string
-	mu   sync.Mutex
+type JSONStore struct {
+	path        string
+	defaultData any
+	mu          sync.RWMutex
 }
 
-// NewJSONStore 创建针对 path 的 JSON 存储。
-func NewJSONStore[T any](path string) *JSONStore[T] {
-	return &JSONStore[T]{path: path}
+func NewJSONStore(path string, defaultData any) *JSONStore {
+	return &JSONStore{path: path, defaultData: defaultData}
 }
 
-// Load 读取并解析 JSON 文件。
-// 文件不存在时返回错误，调用方可用 errors.Is(err, os.ErrNotExist) 判断并做初始化。
-func (s *JSONStore[T]) Load() (T, error) {
-	var out T
+func (s *JSONStore) Path() string { return s.path }
 
-	data, err := os.ReadFile(s.path)
-	if err != nil {
-		return out, err
-	}
-	if err := json.Unmarshal(data, &out); err != nil {
-		return out, fmt.Errorf("解析 %s 失败: %w", s.path, err)
-	}
-	return out, nil
-}
-
-// Save 将 v 序列化为 JSON 并原子写入（写临时文件 → rename），保证并发写安全。
-func (s *JSONStore[T]) Save(v T) error {
+func (s *JSONStore) Ensure() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, err := os.Stat(s.path); err == nil {
+		return nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return writeJSONFileLocked(s.path, s.defaultData)
+}
 
-	data, err := json.MarshalIndent(v, "", "  ")
+func (s *JSONStore) LoadInto(v any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := os.Stat(s.path); errors.Is(err, os.ErrNotExist) {
+		if err := writeJSONFileLocked(s.path, s.defaultData); err != nil {
+			return err
+		}
+	}
+	raw, err := os.ReadFile(s.path)
 	if err != nil {
-		return fmt.Errorf("序列化 %s 失败: %w", s.path, err)
+		return err
 	}
-
-	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("创建目录 %s 失败: %w", dir, err)
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(s.defaultData)
 	}
+	return json.Unmarshal(raw, v)
+}
 
-	tmp, err := os.CreateTemp(dir, ".tmp-*.json")
+func (s *JSONStore) LoadAny() (any, error) {
+	var v any
+	if err := s.LoadInto(&v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func (s *JSONStore) Save(v any) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeJSONFileLocked(s.path, v)
+}
+
+func writeJSONFileLocked(path string, v any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
-		return fmt.Errorf("创建临时文件失败: %w", err)
+		return err
 	}
-	tmpName := tmp.Name()
-	// 失败路径清理临时文件；rename 成功后 tmpName 已不存在，Remove 为无害 no-op。
-	defer func() { _ = os.Remove(tmpName) }()
-
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("写入临时文件失败: %w", err)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return fmt.Errorf("同步临时文件失败: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("关闭临时文件失败: %w", err)
-	}
-
-	if err := os.Rename(tmpName, s.path); err != nil {
-		return fmt.Errorf("原子替换 %s 失败: %w", s.path, err)
-	}
-	return nil
+	return os.Rename(tmp, path)
 }

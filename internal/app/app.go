@@ -6,11 +6,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/welcomemonth/web2api/internal/config"
+	"github.com/welcomemonth/web2api/internal/runtime"
 )
 
 type App struct {
 	Config *config.Config
 	engine *gin.Engine
+
+	accounts *runtime.AccountPool
 }
 
 // New 依据配置定位 DataDir 下的各 JSON 文件并加载到内存。

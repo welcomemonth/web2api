@@ -16,8 +16,18 @@ func (app *App) registerAdminRouter(router *gin.Engine) {
 
 func (app *App) adminStatus(c *gin.Context) {
 	// TODO
+	perAccount := []map[string]any{}
+
+	for _, acc := range app.accounts.Snapshot() {
+		perAccount = append(perAccount, map[string]any{
+			"email": acc.Email, "status": acc.StatusCode, "inflight": acc.Inflight,
+			"max_inflight": 1, "consecutive_failures": acc.ConsecutiveFailures,
+			"rate_limit_strikes": acc.RateLimitStrikes, "last_request_finished": acc.LastRequestFinished,
+		})
+	}
+
 	c.JSONP(http.StatusOK, map[string]any{
-		"accounts":           "app.accounts.Status()",
+		"accounts":           app.accounts.Status(),
 		"per_account":        "perAccount",
 		"chat_id_pool":       "app.chatPool.Status()",
 		"runtime":            map[string]any{"mode": "go", "goroutines_note": "not exposed"},
