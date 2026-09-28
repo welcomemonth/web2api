@@ -27,9 +27,9 @@ func (app *App) adminStatus(c *gin.Context) {
 	}
 
 	c.JSONP(http.StatusOK, map[string]any{
-		"accounts":           app.accounts.Status(),
-		"per_account":        "perAccount",
-		"chat_id_pool":       "app.chatPool.Status()",
+		"accounts":    app.accounts.Status(),
+		"per_account": perAccount,
+		// "chat_id_pool":       app.chatPool.Status(), // 对话框预热池？是不是不需要了
 		"runtime":            map[string]any{"mode": "go", "goroutines_note": "not exposed"},
 		"request_runtime":    map[string]any{"mode": "direct_http", "browser_required_for_requests": false, "description": "普通请求直连 HTTP，不经过浏览器"},
 		"browser_automation": map[string]any{"mode": "playwright", "description": "Go 后端通过 Playwright 浏览器自动化支持邮箱激活"},

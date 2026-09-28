@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/welcomemonth/web2api/internal/config"
 	"github.com/welcomemonth/web2api/internal/runtime"
+	"github.com/welcomemonth/web2api/internal/storage"
 )
 
 type App struct {
@@ -14,17 +15,24 @@ type App struct {
 	engine *gin.Engine
 
 	accounts *runtime.AccountPool
+
+	usersStore    *storage.JSONStore
+	accountsStore *storage.JSONStore
 }
 
 // New 依据配置定位 DataDir 下的各 JSON 文件并加载到内存。
 // 任一文件损坏都会返回错误，避免带病启动。
 func New(cfg *config.Config) (*App, error) {
 	a := &App{
-		Config: cfg,
+		Config:        cfg,
+		usersStore:    storage.NewJSONStore(cfg.DataDir+"/user.json", []any{}),
+		accountsStore: storage.NewJSONStore(cfg.DataDir+"/accounts.json", []any{}),
 	}
 	if err := a.load(); err != nil {
 		return nil, err
 	}
+	a.accounts = runtime.NewAccountPool(a.accountsStore, *a.Config)
+
 	return a, nil
 }
 

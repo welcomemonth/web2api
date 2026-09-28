@@ -138,6 +138,9 @@ func (p *AccountPool) Snapshot() []model.Account {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	out := make([]model.Account, 0, len(p.accounts))
+	if len(p.accounts) < 1 {
+		return out
+	}
 	for _, acc := range p.accounts {
 		// acc.syncLegacyRateLimit() // TODO 需要深拷贝其他变量
 		cp := *acc
