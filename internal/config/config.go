@@ -18,13 +18,16 @@ type Config struct {
 	Port int
 	// DataDir JSON 数据文件所在目录。
 	DataDir string
+	// LogsDir 日志存储目录
+	LogsDir string
 	// JWTSecret 管理员 JWT 的签名密钥。
 	JWTSecret string
 	// JWTExpiry 管理员 JWT 有效期。
 	JWTExpiry time.Duration
+
+	LogLevel string
+	IsProd   bool
 	// APIRateLimitRPM 每个 API Key 每分钟最大请求数（第一版固定值）。
-	LogLevel        string
-	IsProd          bool
 	APIRateLimitRPM int
 	// AccountWaitTimeout 无空闲账号时请求的最长等待时间。
 	AccountWaitTimeout time.Duration
@@ -38,6 +41,7 @@ func Default() Config {
 	return Config{
 		Port:               8080,
 		DataDir:            "./data/",
+		LogsDir:            "./logs/",
 		IsProd:             false,
 		LogLevel:           "debug",
 		JWTSecret:          jwtSecret(),

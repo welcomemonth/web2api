@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -26,6 +27,12 @@ type App struct {
 // New 依据配置定位 DataDir 下的各 JSON 文件并加载到内存。
 // 任一文件损坏都会返回错误，避免带病启动。
 func New(cfg *config.Config) (*App, error) {
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(cfg.LogsDir, 0o755); err != nil {
+		return nil, err
+	}
 	pw, err := playwright.Run() // todo app关闭的时候需要stop
 	if err != nil {
 		return nil, err
@@ -51,6 +58,9 @@ func New(cfg *config.Config) (*App, error) {
 		accountsStore: accountsStore,
 	}
 	if err := a.load(); err != nil {
+		return nil, err
+	}
+	if err := a.accounts.Load(); err != nil {
 		return nil, err
 	}
 	return a, nil
