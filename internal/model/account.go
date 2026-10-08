@@ -8,11 +8,11 @@ import (
 )
 
 const (
-	accountUsageChat     = "chat"
-	accountUsageImage    = "image"
-	accountUsageVideo    = "video"
-	accountUsageMetadata = "metadata"
-	accountUsageUnknown  = "unknown"
+	AccountUsageChat     = "chat"
+	AccountUsageImage    = "image"
+	AccountUsageVideo    = "video"
+	AccountUsageMetadata = "metadata"
+	AccountUsageUnknown  = "unknown"
 )
 
 const (
@@ -74,7 +74,7 @@ func (a *Account) Status() string {
 	if a.ActivationPending {
 		return "pending_activation"
 	}
-	if a.RateLimitedUntilFor(accountUsageChat) > float64(time.Now().UnixNano())/1e9 {
+	if a.RateLimitedUntilFor(AccountUsageChat) > float64(time.Now().UnixNano())/1e9 {
 		return "rate_limited"
 	}
 	if a.Valid {
@@ -98,7 +98,7 @@ func (a *Account) MigrateLegacyRateLimit() {
 	}
 	if until > now {
 		usage := inferRateLimitUsage(a.LastError)
-		if usage != accountUsageUnknown {
+		if usage != AccountUsageUnknown {
 			a.SetRateLimitFor(usage, until, a.LastError)
 		}
 	}
@@ -150,7 +150,7 @@ func (a *Account) syncLegacyRateLimit() {
 	if a == nil {
 		return
 	}
-	a.RateLimitedUntil = a.RateLimitedUntilFor(accountUsageChat)
+	a.RateLimitedUntil = a.RateLimitedUntilFor(AccountUsageChat)
 }
 
 func (a *Account) compactRateLimits() {
@@ -163,7 +163,7 @@ func (a *Account) compactRateLimits() {
 		if normalized != usage {
 			delete(a.RateLimits, usage)
 		}
-		if normalized == accountUsageUnknown && state.Reason == "legacy_unknown_quota_limited" {
+		if normalized == AccountUsageUnknown && state.Reason == "legacy_unknown_quota_limited" {
 			delete(a.RateLimits, usage)
 			continue
 		}
@@ -200,13 +200,13 @@ func inferRateLimitUsage(message string) string {
 	lower := strings.ToLower(message)
 	switch {
 	case strings.Contains(lower, "image") || strings.Contains(lower, "image_gen") || strings.Contains(lower, "t2i") || strings.Contains(lower, "picture") || strings.Contains(lower, "photo") || strings.Contains(lower, "图片") || strings.Contains(lower, "图像") || strings.Contains(lower, "cdn.qwenlm.ai"):
-		return accountUsageImage
+		return AccountUsageImage
 	case strings.Contains(lower, "video") || strings.Contains(lower, "t2v") || strings.Contains(lower, ".mp4") || strings.Contains(lower, "视频"):
-		return accountUsageVideo
+		return AccountUsageVideo
 	case strings.Contains(lower, "chat") || strings.Contains(lower, "t2t") || strings.Contains(lower, "message") || strings.Contains(lower, "completion") || strings.Contains(lower, "对话"):
-		return accountUsageChat
+		return AccountUsageChat
 	default:
-		return accountUsageUnknown
+		return AccountUsageUnknown
 	}
 }
 
@@ -244,16 +244,16 @@ func isRateLimitErrorMessage(lower string) bool {
 
 func normalizeAccountUsage(usage string) string {
 	switch strings.ToLower(strings.TrimSpace(usage)) {
-	case "", accountUsageChat, "completion", "conversation", "message", "messages", "text", "t2t":
-		return accountUsageChat
-	case accountUsageImage, "images", "image_gen", "t2i", "picture", "photo":
-		return accountUsageImage
-	case accountUsageVideo, "videos", "t2v", "video_gen":
-		return accountUsageVideo
-	case accountUsageMetadata, "models", "model", "account", "verify", "verification":
-		return accountUsageMetadata
-	case accountUsageUnknown, "legacy", "global":
-		return accountUsageUnknown
+	case "", AccountUsageChat, "completion", "conversation", "message", "messages", "text", "t2t":
+		return AccountUsageChat
+	case AccountUsageImage, "images", "image_gen", "t2i", "picture", "photo":
+		return AccountUsageImage
+	case AccountUsageVideo, "videos", "t2v", "video_gen":
+		return AccountUsageVideo
+	case AccountUsageMetadata, "models", "model", "account", "verify", "verification":
+		return AccountUsageMetadata
+	case AccountUsageUnknown, "legacy", "global":
+		return AccountUsageUnknown
 	default:
 		return strings.ToLower(strings.TrimSpace(usage))
 	}
@@ -261,13 +261,13 @@ func normalizeAccountUsage(usage string) string {
 
 func rateLimitReasonForUsage(usage string) string {
 	switch normalizeAccountUsage(usage) {
-	case accountUsageImage:
+	case AccountUsageImage:
 		return "image_quota_limited"
-	case accountUsageVideo:
+	case AccountUsageVideo:
 		return "video_quota_limited"
-	case accountUsageMetadata:
+	case AccountUsageMetadata:
 		return "metadata_rate_limited"
-	case accountUsageUnknown:
+	case AccountUsageUnknown:
 		return "legacy_unknown_quota_limited"
 	default:
 		return "chat_rate_limited"
