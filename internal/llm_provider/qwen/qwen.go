@@ -14,7 +14,13 @@ import (
 	"github.com/welcomemonth/web2api/internal/utils"
 )
 
-const qwenBaseURL = "https://chat.qwen.ai"
+// ==================== 配置 ====================
+const (
+	DefaultTimeoutMs = 30000.0 // 30s
+	ShortTimeoutMs   = 5000.0  // 5s，用于快速失败
+	RetryInterval    = 300 * time.Millisecond
+	QwenBaseURL      = "https://chat.qwen.ai"
+)
 
 type Client struct {
 	pool           *runtime.AccountPool
@@ -63,7 +69,7 @@ func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Accoun
 	}
 	defer page.Close()
 	// =============  打开目标网站 ===============
-	if _, err = page.Goto(qwenBaseURL+"/auth", playwright.PageGotoOptions{
+	if _, err = page.Goto(QwenBaseURL+"/auth", playwright.PageGotoOptions{
 		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
 	}); err != nil {
 		result.Error = err.Error()
@@ -100,150 +106,224 @@ func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Accoun
 	return result
 }
 
+// ==================== 1. 清理遮挡物 ====================
+// 尽量清除可能遮挡的悬浮层、Tooltip、Modal 残留
+func ClearOverlays(page playwright.Page) {
+	// 1. 按下ESC (关闭绝大多数非模态层)
+	_ = page.Keyboard().Press("Escape")
+	time.Sleep(300 * time.Millisecond)
+
+	// 2. 可选：点击空白处关闭一些下拉/提示 (暂时注释，不确定点击哪个位置)
+	// _ = page.Mouse().Click(10, 10)
+
+	// 3. 可选：用 JS 强制移除常见遮罩（根据实际页面调整选择器）
+	_, _ = page.Evaluate(`() => {
+		document.querySelectorAll('.modal-backdrop, .overlay, .tooltip, [role="dialog"]').forEach(el => {
+			if (el.style) el.style.display = 'none';
+		});
+	}`)
+}
+
+// ==================== 2. 安全点击（核心复用函数） ====================
+// 多重策略：常规 → Force → JS 原生 click + 事件派发
+// 最终失败返回 error
+func SafeClick(locator playwright.Locator, timeoutMs float64) error {
+	if timeoutMs <= 0 {
+		timeoutMs = DefaultTimeoutMs
+	}
+	short := ShortTimeoutMs
+	// 先等待元素出现
+	if err := locator.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: &timeoutMs,
+	}); err != nil {
+		return fmt.Errorf("等待元素可见失败: %w", err)
+	}
+	// 策略 1: 常规点击（带 actionability 检查）
+	err := locator.Click(playwright.LocatorClickOptions{
+		Timeout: &short,
+	})
+	if err == nil {
+		return nil
+	}
+	slog.Debug("常规点击失败，尝试 Force", "err", err)
+
+	// 策略 2: Force 强制点击（忽略遮挡）
+	err = locator.Click(playwright.LocatorClickOptions{
+		Force:   playwright.Bool(true),
+		Timeout: &short,
+	})
+	if err == nil {
+		return nil
+	}
+	slog.Debug("Force 点击失败，尝试 JS 兜底", "err", err)
+	// 策略 3: JS 终极兜底
+	_, err = locator.Evaluate(`(el) => {
+		el.scrollIntoView({block: 'center', behavior: 'instant'});
+		el.click();
+		el.dispatchEvent(new MouseEvent('click', {
+			bubbles: true,
+			cancelable: true,
+			view: window
+		}));
+	}`, nil)
+	if err != nil {
+		return fmt.Errorf("所有点击策略均失败: %w", err)
+	}
+	return nil
+}
+
+// ==================== 3. 安全填充输入框 ====================
+// Focus → Fill → JS 注入（触发 input/change）
+func SafeFill(locator playwright.Locator, value string, timeoutMs float64) error {
+	if timeoutMs <= 0 {
+		timeoutMs = DefaultTimeoutMs
+	}
+
+	// 先尝试 Focus（比 Click 更轻量）
+	err := locator.Focus(playwright.LocatorFocusOptions{Timeout: &timeoutMs})
+	if err != nil {
+		// Focus 失败就 Force Click
+		if err2 := SafeClick(locator, timeoutMs); err2 != nil {
+			return fmt.Errorf("聚焦/点击输入框失败: %w", err2)
+		}
+	}
+
+	// 常规 Fill
+	err = locator.Fill(value, playwright.LocatorFillOptions{Timeout: &timeoutMs})
+	if err == nil {
+		return nil
+	}
+	slog.Debug("常规 Fill 失败，使用 JS 注入", "err", err)
+
+	// JS 强制注入 + 触发事件
+	_, err = locator.Evaluate(`(el, val) => {
+		el.focus();
+		el.value = val;
+		el.dispatchEvent(new Event('input',  { bubbles: true }));
+		el.dispatchEvent(new Event('change', { bubbles: true }));
+		// 部分框架还需要这个
+		el.dispatchEvent(new Event('blur',   { bubbles: true }));
+	}`, value)
+	if err != nil {
+		return fmt.Errorf("JS 注入值失败: %w", err)
+	}
+	return nil
+}
+
+// ==================== 4. 判断函数（可复用） ====================
+// 元素是否可见且可交互
+func IsInteractable(locator playwright.Locator, timeoutMs float64) bool {
+	if timeoutMs <= 0 {
+		timeoutMs = 3000.0
+	}
+	err := locator.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateVisible,
+		Timeout: &timeoutMs,
+	})
+	if err != nil {
+		return false
+	}
+	// 额外检查 enabled
+	enabled, err := locator.IsEnabled()
+	return err == nil && enabled
+}
+
+// 元素是否存在（不要求可见）
+func Exists(locator playwright.Locator, timeoutMs float64) bool {
+	if timeoutMs <= 0 {
+		timeoutMs = 2000.0
+	}
+	err := locator.WaitFor(playwright.LocatorWaitForOptions{
+		State:   playwright.WaitForSelectorStateAttached,
+		Timeout: &timeoutMs,
+	})
+	return err == nil
+}
+
+// 在填写账号密码之前，先判断并切换到密码登录模式
+func switchToPasswordLoginIfNeeded(page playwright.Page) error {
+	// 定位“使用密码登录”按钮（多重保险）
+	passwordLoginBtn := page.Locator("div.qwenchat-email-otp-panel-return button").
+		Or(page.GetByRole("button", playwright.PageGetByRoleOptions{
+			Name:  "使用密码登录",
+			Exact: playwright.Bool(true),
+		})).
+		Or(page.Locator("button:has-text('使用密码登录')"))
+
+	// 判断按钮是否存在（给 3 秒超时即可）
+	if !Exists(passwordLoginBtn, 3000) {
+		slog.Info("未发现「使用密码登录」按钮，当前已是密码登录模式或页面结构不同")
+		return nil
+	}
+
+	slog.Info("发现「使用密码登录」按钮，准备点击切换...")
+	if err := SafeClick(passwordLoginBtn, DefaultTimeoutMs); err != nil {
+		return fmt.Errorf("点击「使用密码登录」失败: %w", err)
+	}
+
+	// 点击后给页面一点时间切换表单
+	time.Sleep(800 * time.Millisecond)
+	slog.Info("✓ 已切换到密码登录模式")
+	return nil
+}
+
 func login(page playwright.Page, account, password string) error {
 	if account == "" || password == "" {
 		return fmt.Errorf("账号或密码不能为空")
 	}
 
-	timeoutMs := 30000.0 // 30秒
-	// ==========================================
-	// 0. 预处理：尝试清除可能的遮挡物
-	// ==========================================
-	// 按 ESC 键可以关闭绝大多数非模态的悬浮窗、Tooltip 或残留的遮罩层
-	page.Keyboard().Press("Escape")
-	time.Sleep(500 * time.Millisecond) // 给页面 0.5 秒时间响应关闭动作
-	// ==========================================
-	// 1. 定位邮箱输入框 (多重保险策略)
-	// ==========================================
-	// 优先级 1: name="email" (最稳定，与后端表单提交强绑定，前端极少修改)
-	// 优先级 2: placeholder 包含 "邮箱" (模糊匹配，即使改成"请输入邮箱"也能命中)
-	// 优先级 3: data-gtm-form-interact-field-id="0" (埋点属性，为了数据统计连续性，通常常年不变)
-	// ==========================================
-	// 1. 填写邮箱 (跳过 Click，直接 Focus + Fill)
-	// ==========================================
+	// 0. 清理可能的遮挡
+	ClearOverlays(page)
+
+	// 1. 关键存在「使用密码登录」按钮，就先点击切换
+	if err := switchToPasswordLoginIfNeeded(page); err != nil {
+		return err
+	}
+	// 2. 填写邮箱
 	emailInput := page.Locator("input[name='email']").
-		Or(page.Locator("input[placeholder*='邮箱']"))
+		Or(page.Locator("input[placeholder*='邮箱']")).
+		Or(page.Locator(`[data-gtm-form-interact-field-id="0"]`))
 
-	// 策略 A: 尝试直接获取焦点 (比 Click 更轻量，不易被遮挡判定卡死)
-	err := emailInput.Focus(playwright.LocatorFocusOptions{Timeout: &timeoutMs})
-	if err != nil {
-		fmt.Println("⚠️ 常规聚焦失败，可能被遮挡，尝试强制点击...")
-		// 策略 B: 如果 Focus 失败，启用 Force 模式强制点击
-		err = emailInput.Click(playwright.LocatorClickOptions{
-			Force:   playwright.Bool(true), // 忽略遮挡检查，强制触发点击
-			Timeout: &timeoutMs,
-		})
-		if err != nil {
-			return fmt.Errorf("强制点击邮箱输入框失败: %v", err)
-		}
+	if err := SafeFill(emailInput, account, DefaultTimeoutMs); err != nil {
+		return fmt.Errorf("填写邮箱失败: %w", err)
 	}
+	slog.Info("✓ 邮箱已填写")
+	time.Sleep(800 * time.Millisecond)
 
-	// 策略 C: 填充内容。如果 Fill 依然被前端框架拦截，使用 JS 兜底
-	err = emailInput.Fill(account)
-	if err != nil {
-		fmt.Println("⚠️ 常规填充失败，使用 JS 强制注入...")
-		_, err = emailInput.Evaluate(`
-			(el, val) => {
-				el.value = val;
-				el.focus();
-				el.dispatchEvent(new Event('input', { bubbles: true }));
-				el.dispatchEvent(new Event('change', { bubbles: true }));
-			}
-		`, account)
-		if err != nil {
-			return fmt.Errorf("JS 注入邮箱失败: %v", err)
-		}
-	}
-	fmt.Println("✓ 邮箱已填写")
-	time.Sleep(2000 * time.Millisecond)
-	// ==========================================
-	// 2. 定位密码输入框 (多重保险策略)
-	// ==========================================
-	// 优先级 1: name="password" (最稳定)
-	// 优先级 2: type="password" (密码框的通用特征)
-	// 优先级 3: data-gtm-form-interact-field-id="1" (埋点属性)
+	// 3. 填写密码
 	passwordInput := page.Locator("input[name='password']").
-		Or(page.Locator("input[type='password']"))
+		Or(page.Locator("input[type='password']")).
+		Or(page.Locator(`[data-gtm-form-interact-field-id="1"]`))
 
-	err = passwordInput.Focus(playwright.LocatorFocusOptions{Timeout: &timeoutMs})
-	if err != nil {
-		err = passwordInput.Click(playwright.LocatorClickOptions{
-			Force:   playwright.Bool(true),
-			Timeout: &timeoutMs,
-		})
-		if err != nil {
-			return fmt.Errorf("强制点击密码输入框失败: %v", err)
-		}
+	if err := SafeFill(passwordInput, password, DefaultTimeoutMs); err != nil {
+		return fmt.Errorf("填写密码失败: %w", err)
 	}
+	slog.Info("✓ 密码已填写")
+	time.Sleep(800 * time.Millisecond)
 
-	err = passwordInput.Fill(password)
-	if err != nil {
-		_, err = passwordInput.Evaluate(`
-			(el, val) => {
-				el.value = val;
-				el.focus();
-				el.dispatchEvent(new Event('input', { bubbles: true }));
-				el.dispatchEvent(new Event('change', { bubbles: true }));
+	// 登录按钮（优先按钮，失败再用 Enter）
+	loginBtn := page.Locator("button[type='submit']").
+		Or(page.GetByRole("button", playwright.PageGetByRoleOptions{
+			Name:  "登录",
+			Exact: playwright.Bool(true),
+		})).
+		Or(page.Locator("button:has-text('登录')"))
+
+	if IsInteractable(loginBtn, ShortTimeoutMs) {
+		if err := SafeClick(loginBtn, DefaultTimeoutMs); err != nil {
+			slog.Warn("点击登录按钮失败，尝试回车", "err", err)
+			if err := page.Keyboard().Press("Enter"); err != nil {
+				return fmt.Errorf("回车提交也失败: %w", err)
 			}
-		`, password)
-		if err != nil {
-			return fmt.Errorf("JS 注入密码失败: %v", err)
+		}
+	} else {
+		// 按钮不可见时直接回车
+		if err := page.Keyboard().Press("Enter"); err != nil {
+			return fmt.Errorf("按下回车键失败: %v", err)
 		}
 	}
-	fmt.Println("✓ 密码已填写")
-	time.Sleep(2000 * time.Millisecond)
 
-	// ==========================================
-	// 3. 点击登录按钮
-	// ==========================================
-	slog.Debug("尝试通过键盘回车键提交表单...")
-	err = page.Keyboard().Press("Enter")
-	if err != nil {
-		return fmt.Errorf("按下回车键失败: %v", err)
-	}
-	// loginBtn := page.Locator("button[type='submit']").
-	// 	Or(page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "登录", Exact: playwright.Bool(true)}))
-
-	// err = loginBtn.WaitFor(playwright.LocatorWaitForOptions{Timeout: &timeoutMs})
-	// if err != nil {
-	// 	return fmt.Errorf("等待登录按钮失败: %v", err)
-	// }
-	// // 策略 1: 尝试常规点击 (设置较短超时，避免干等 30 秒)
-	// shortTimeout := 5000.0 // 5秒
-	// err = loginBtn.Click(playwright.LocatorClickOptions{
-	// 	Timeout: &shortTimeout,
-	// })
-	// if err != nil {
-	// 	fmt.Println("⚠️ 常规点击被遮挡或超时，尝试策略 2：Force 强制点击...")
-
-	// 	// 策略 2: 启用 Force 模式，告诉 Playwright 忽略所有遮挡检查，直接派发点击事件
-	// 	err = loginBtn.Click(playwright.LocatorClickOptions{
-	// 		Force:   playwright.Bool(true),
-	// 		Timeout: &shortTimeout,
-	// 	})
-
-	// 	if err != nil {
-	// 		fmt.Println("⚠️ Force 点击仍失败，尝试策略 3：JavaScript 终极兜底点击...")
-
-	// 		// 策略 3: 完全绕过 Playwright 的模拟鼠标机制，直接在浏览器 DOM 层面执行点击
-	// 		_, err = loginBtn.Evaluate(`
-	// 			(el) => {
-	// 				// 尝试原生点击
-	// 				el.click();
-	// 				// 如果原生点击被前端框架拦截，强制派发一个冒泡的 MouseEvent
-	// 				el.dispatchEvent(new MouseEvent('click', {
-	// 					bubbles: true,
-	// 					cancelable: true,
-	// 					view: window
-	// 				}));
-	// 			}
-	// 		`, nil)
-	// 		if err != nil {
-	// 			return fmt.Errorf("所有点击策略均失败，可能存在严重的 DOM 遮挡或前端拦截: %v", err)
-	// 		}
-	// 	}
-	// }
-	slog.Info("✓ 已点击登录按钮，等待页面响应...")
-
+	slog.Info("✓ 已触发登录，等待页面响应...")
 	return nil
 }
