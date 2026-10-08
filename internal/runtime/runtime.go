@@ -171,6 +171,21 @@ func (p *AccountPool) Add(acc model.Account) error {
 	return p.store.Save(p.accounts)
 }
 
+func (p *AccountPool) Remove(email string) error {
+	p.mu.Lock()
+	next := p.accounts[:0]
+	for _, acc := range p.accounts {
+		if acc.Email != email {
+			next = append(next, acc)
+		}
+	}
+
+	p.accounts = next
+	p.resetLocked()
+	p.mu.Unlock()
+	return p.store.Save(p.accounts)
+}
+
 // func (p *AccountPool) Save() error {
 // 	return p.store.Save()
 // }

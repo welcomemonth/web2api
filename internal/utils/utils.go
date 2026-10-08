@@ -365,3 +365,11 @@ func GetEmailHashFilename(email string) string {
 	// 步骤 C：拼接扩展名
 	return hashString + ".json"
 }
+
+func VerifyEmail(email string) bool {
+	if !strings.Contains(email, "@") || strings.Contains(email, "/") || strings.Contains(email, "\\") {
+		return false
+	}
+
+	return true
+}
