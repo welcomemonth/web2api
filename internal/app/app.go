@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/mxschmitt/playwright-go"
 	"github.com/welcomemonth/web2api/internal/config"
+	"github.com/welcomemonth/web2api/internal/llm_provider/qwen"
 	"github.com/welcomemonth/web2api/internal/runtime"
 	"github.com/welcomemonth/web2api/internal/storage"
 )
@@ -13,9 +15,10 @@ import (
 type App struct {
 	Config *config.Config
 	engine *gin.Engine
+	client *qwen.Client
 
-	accounts *runtime.AccountPool
-
+	accounts      *runtime.AccountPool
+	browser       playwright.Browser
 	usersStore    *storage.JSONStore
 	accountsStore *storage.JSONStore
 }
@@ -23,16 +26,33 @@ type App struct {
 // New 依据配置定位 DataDir 下的各 JSON 文件并加载到内存。
 // 任一文件损坏都会返回错误，避免带病启动。
 func New(cfg *config.Config) (*App, error) {
+	pw, err := playwright.Run() // todo app关闭的时候需要stop
+	if err != nil {
+		return nil, err
+	}
+	browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
+		Headless: playwright.Bool(false), // 设为 false 方便界面查看与手动操作
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	accountsStore := storage.NewJSONStore(cfg.DataDir+"/accounts.json", []any{})
+	accounts := runtime.NewAccountPool(accountsStore, *cfg)
+	qwenClient, err := qwen.NewClient(accounts, browser, cfg)
+	if err != nil {
+		return nil, err
+	}
 	a := &App{
 		Config:        cfg,
+		client:        qwenClient,
+		accounts:      accounts,
 		usersStore:    storage.NewJSONStore(cfg.DataDir+"/user.json", []any{}),
-		accountsStore: storage.NewJSONStore(cfg.DataDir+"/accounts.json", []any{}),
+		accountsStore: accountsStore,
 	}
 	if err := a.load(); err != nil {
 		return nil, err
 	}
-	a.accounts = runtime.NewAccountPool(a.accountsStore, *a.Config)
-
 	return a, nil
 }
 

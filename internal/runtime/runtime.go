@@ -9,7 +9,6 @@ import (
 	"github.com/welcomemonth/web2api/internal/config"
 	"github.com/welcomemonth/web2api/internal/model"
 	"github.com/welcomemonth/web2api/internal/storage"
-	"github.com/welcomemonth/web2api/internal/utils"
 )
 
 const AccountReadySetThreshold = 1
@@ -85,14 +84,14 @@ func (p *AccountPool) resetLocked() {
 		if acc.Valid {
 			valid++
 		}
-		if acc.AvailableFor("chat") {
+		if acc.AvailableFor(model.AccountUsageChat) {
 			available++
 		}
 	}
 	p.recommendedConcurrency = available * p.maxInflightPerAccount
 	p.globalMaxInflight = p.recommendedConcurrency
 	p.maxQueueSize = p.recommendedConcurrency
-	p.readySetEnabled = valid >= utils.MaxInt(AccountReadySetThreshold, 1)
+	// p.readySetEnabled = valid >= utils.MaxInt(AccountReadySetThreshold, 1)
 }
 
 func (p *AccountPool) Status() map[string]any {
@@ -151,3 +150,27 @@ func (p *AccountPool) Snapshot() []model.Account {
 	sort.Slice(out, func(i, j int) bool { return out[i].Email < out[j].Email })
 	return out
 }
+
+func (p *AccountPool) Add(acc model.Account) error {
+	// acc.normalize() // 根据已有信息初始化内容
+	p.mu.Lock()
+	replaced := false
+	for i, existing := range p.accounts {
+		if existing.Email == acc.Email && acc.Email != "" {
+			p.accounts[i] = &acc
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		p.accounts = append(p.accounts, &acc)
+	}
+	p.resetLocked()
+	p.mu.Unlock()
+	// 暂时不需要 判断这个账号来源，直接保存即可
+	return p.store.Save(p.accounts)
+}
+
+// func (p *AccountPool) Save() error {
+// 	return p.store.Save()
+// }

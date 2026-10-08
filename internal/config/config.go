@@ -37,7 +37,7 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Port:               8080,
-		DataDir:            "data",
+		DataDir:            "./data/",
 		IsProd:             false,
 		LogLevel:           "debug",
 		JWTSecret:          jwtSecret(),
