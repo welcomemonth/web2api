@@ -179,7 +179,7 @@ func (p *AccountPool) Remove(email string) error {
 			next = append(next, acc)
 		}
 	}
-
+	// FIXME 这个地方删除账号之后应该将cookie文件也删除
 	p.accounts = next
 	p.resetLocked()
 	p.mu.Unlock()

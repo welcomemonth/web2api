@@ -373,3 +373,14 @@ func VerifyEmail(email string) bool {
 
 	return true
 }
+
+func RedactToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "-"
+	}
+	if len(token) <= 12 {
+		return "token-hidden"
+	}
+	return token[:6] + "..." + token[len(token)-4:]
+}

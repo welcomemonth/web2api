@@ -19,6 +19,7 @@ func (app *App) registerAdminRouter(router *gin.Engine) {
 	adminRouter.GET("/status", app.adminStatus)
 	adminRouter.GET("/accounts", app.adminListAccounts)
 	adminRouter.POST("/accounts", app.adminAddAccount)
+	adminRouter.POST("/accounts/:email/verify", app.adminVerifyAccount)
 	adminRouter.DELETE("/accounts/:email", app.adminDeleteAccount)
 }
 
@@ -117,5 +118,25 @@ func (app *App) adminDeleteAccount(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"ok": true,
 	})
-	return
+}
+
+func (app *App) adminVerifyAccount(c *gin.Context) {
+	email := c.Param("email")
+	if !utils.VerifyEmail(email) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid email format"})
+		return
+	}
+
+	for _, acc := range app.accounts.Snapshot() {
+		if acc.Email == email {
+			verify := app.client.VerifyTokenDetail(c.Request.Context(), acc.Token)
+			// _ = app.accounts.MarkVerification(acc.Email, verify)
+			c.JSON(http.StatusOK, gin.H{"email": email, "valid": verify.Valid, "status_code": verify.StatusCode, "error": verify.Error, "refreshed": false})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{
+		"detail": "Account not found",
+	})
+
 }

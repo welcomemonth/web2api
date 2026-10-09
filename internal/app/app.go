@@ -37,7 +37,7 @@ func New(cfg *config.Config) (*App, error) {
 	if err != nil {
 		return nil, err
 	}
-	browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
+	browser, err := pw.Chromium.Launch(playwright.BrowserTypeLaunchOptions{
 		Headless: playwright.Bool(false), // 设为 false 方便界面查看与手动操作
 	})
 	if err != nil {
