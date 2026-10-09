@@ -1,9 +1,13 @@
 package app
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +25,11 @@ func (app *App) registerAdminRouter(router *gin.Engine) {
 	adminRouter.POST("/accounts", app.adminAddAccount)
 	adminRouter.POST("/accounts/:email/verify", app.adminVerifyAccount)
 	adminRouter.DELETE("/accounts/:email", app.adminDeleteAccount)
+
+	adminRouter.GET("/keys", app.adminGetKeys)
+	adminRouter.POST("/keys", app.adminCreateKeys)
+	adminRouter.DELETE("/keys/:key", app.adminDeleteKey)
+
 }
 
 func (app *App) adminStatus(c *gin.Context) {
@@ -139,4 +148,98 @@ func (app *App) adminVerifyAccount(c *gin.Context) {
 		"detail": "Account not found",
 	})
 
+}
+
+func (app *App) adminGetKeys(c *gin.Context) {
+	keys := []string{}
+	items := []map[string]any{}
+
+	for key := range app.apiKeys {
+		keys = append(keys, key)
+		source := "managed"
+		label := "面板创建 Key"
+		if app.envAPIKeys[key] {
+			source = "env"
+			label = "环境变量注入 Key"
+		}
+		items = append(items, map[string]any{"key": key, "source": source, "label": label})
+	}
+	sort.Strings(keys)
+	sort.Slice(items, func(i, j int) bool {
+		return fmt.Sprint(items[i]["key"]) < fmt.Sprint(items[j]["key"])
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"keys":  keys,
+		"items": items,
+	})
+}
+
+func (app *App) adminCreateKeys(c *gin.Context) {
+	var body struct {
+		Mode string `json:"mode"`
+		Key  string `json:"key"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"detail": err.Error(),
+		})
+		return
+	}
+	mode := utils.NormalizeLower(body.Mode)
+	if mode == "" {
+		mode = "auto"
+	}
+	key := strings.TrimSpace(body.Key)
+
+	if mode == "custom" {
+		if key == "" {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"detail": "自定义 Key 不能为空",
+			})
+			return
+		}
+		if strings.ContainsAny(key, " \t\r\n") {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"detail": "自定义 Key 不能包含空白字符",
+			})
+			return
+		}
+	} else {
+		buf := make([]byte, 24)
+		_, _ = cryptorand.Read(buf)
+		key = "sk-" + hex.EncodeToString(buf)
+	}
+
+	if app.apiKeys[key] {
+		c.JSON(http.StatusConflict, gin.H{
+			"detail": "API Key 已存在",
+		})
+		return
+	}
+
+	app.apiKeys[key] = true
+	app.managedAPIKeys[key] = true
+	_ = saveAPIKeys(app.Config.DataDir+"apikeys.json", app.managedAPIKeys)
+	c.JSON(http.StatusOK, gin.H{"ok": true, "key": key})
+}
+
+func saveAPIKeys(path string, keys map[string]bool) error {
+	list := make([]string, 0, len(keys))
+	for k := range keys {
+		list = append(list, k)
+	}
+	sort.Strings(list)
+	return utils.WriteJSONFileLocked(path, map[string]any{"keys": list})
+}
+
+func (app *App) adminDeleteKey(c *gin.Context) {
+	key := c.Param("key")
+	if app.envAPIKeys[key] {
+		c.JSON(http.StatusBadRequest, gin.H{"detail": "环境变量注入 Key 不能在面板删除，请移除对应环境变量后重启服务"})
+		return
+	}
+	delete(app.apiKeys, key)
+	delete(app.managedAPIKeys, key)
+	_ = saveAPIKeys(app.Config.DataDir+"apikeys.json", app.managedAPIKeys)
+	c.JSON(http.StatusOK, gin.H{"ok": true, "key": key})
 }

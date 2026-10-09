@@ -14,9 +14,12 @@ import (
 )
 
 type App struct {
-	Config *config.Config
-	engine *gin.Engine
-	client *qwen.Client
+	Config         *config.Config
+	engine         *gin.Engine
+	client         *qwen.Client
+	apiKeys        map[string]bool
+	managedAPIKeys map[string]bool
+	envAPIKeys     map[string]bool
 
 	accounts      *runtime.AccountPool
 	browser       playwright.Browser
@@ -51,11 +54,14 @@ func New(cfg *config.Config) (*App, error) {
 		return nil, err
 	}
 	a := &App{
-		Config:        cfg,
-		client:        qwenClient,
-		accounts:      accounts,
-		usersStore:    storage.NewJSONStore(cfg.DataDir+"/user.json", []any{}),
-		accountsStore: accountsStore,
+		Config:         cfg,
+		client:         qwenClient,
+		accounts:       accounts,
+		usersStore:     storage.NewJSONStore(cfg.DataDir+"/user.json", []any{}),
+		accountsStore:  accountsStore,
+		apiKeys:        make(map[string]bool),
+		managedAPIKeys: make(map[string]bool),
+		envAPIKeys:     make(map[string]bool),
 	}
 	if err := a.load(); err != nil {
 		return nil, err
