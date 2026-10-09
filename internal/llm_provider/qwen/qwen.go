@@ -1,9 +1,15 @@
 package qwen
 
 import (
+	"bytes"
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +33,7 @@ type Client struct {
 	mu             sync.Mutex
 	browserContext playwright.BrowserContext
 	cfg            *config.Config
+	http           *http.Client
 }
 
 type VerifyResult struct {
@@ -60,9 +67,92 @@ func NewClient(pool *runtime.AccountPool, browser playwright.Browser, cfg *confi
 	return client, nil
 }
 
+func (q *Client) requestJSON(ctx context.Context, method, path, token string, body any, timeout time.Duration) (int, string, error) {
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return 0, "", err
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, QwenBaseURL+path, reader)
+	if err != nil {
+		return 0, "", err
+	}
+	req.Header = qwenHeaders(token)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	upstreamRequestID := req.Header.Get("x-request-id")
+	start := time.Now()
+	slog.Info("开始上游请求", "method", method, "path", path, "token", utils.RedactToken(token), "upstream_request_id", upstreamRequestID)
+
+	resp, err := q.http.Do(req)
+	if err != nil {
+		slog.Info("上游请求失败", "method", method, "path", path, "token", utils.RedactToken(token), "upstream_request_id", upstreamRequestID, "duration_ms", time.Since(start).Milliseconds(), "error", err)
+		return 0, err.Error(), err
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	attrs := []any{"method", method, "path", path, "token", utils.RedactToken(token), "upstream_request_id", upstreamRequestID, "status", resp.StatusCode, "bytes", len(raw), "duration_ms", time.Since(start).Milliseconds()}
+
+	if resp.StatusCode >= 400 {
+		attrs = append(attrs, "body", utils.Truncate(string(raw), 240))
+		slog.Info("上游请求完成", attrs...)
+	} else {
+		slog.Info("上游请求完成", attrs...)
+	}
+	return resp.StatusCode, string(raw), nil
+}
+
 func (q *Client) VerifyTokenDetail(ctx context.Context, token string) *VerifyResult {
-	slog.Debug("verify Token Detail", "token", token)
-	return nil
+	verifyResult := &VerifyResult{
+		Valid: false,
+	}
+	if strings.TrimSpace(token) == "" {
+		slog.Info("账号 Token 验证失败", "error", "empty token")
+		verifyResult.Error = "empty token"
+		verifyResult.StatusCode = "auth_error"
+		return verifyResult
+	}
+
+	slog.Info("开始账号 Token 验证", "token", utils.RedactToken(token))
+	status, text, err := q.requestJSON(ctx, http.MethodGet, "/api/v2/user/info", token, nil, 20*time.Second)
+
+	if err != nil {
+		slog.Warn("账号 Token 验证请求失败", "token", utils.RedactToken(token), "error", err)
+		return &VerifyResult{StatusCode: "network_error", Error: err.Error()}
+	}
+
+	lower := strings.ToLower(text)
+	if status >= 200 && status < 300 && !strings.Contains(lower, "unauthorized") {
+		slog.Info("账号 Token 验证通过", "token", utils.RedactToken(token), "status", status)
+		return &VerifyResult{Valid: true, StatusCode: "valid"}
+	}
+
+	statusCode := "invalid"
+	switch {
+	case status == 401 || status == 403 || strings.Contains(lower, "unauthorized") || strings.Contains(lower, "forbidden") || strings.Contains(lower, "login") || strings.Contains(lower, "token"):
+		statusCode = "auth_error"
+	case status == 429:
+		statusCode = "rate_limited"
+	case strings.Contains(lower, "ban") || strings.Contains(lower, "disabled"):
+		statusCode = "banned"
+	}
+
+	verifyResult.StatusCode = statusCode
+	verifyResult.Error = fmt.Sprintf("HTTP %d: %s", status, utils.Truncate(text, 200))
+
+	slog.Warn("账号 Token 验证失败", "token", utils.RedactToken(token), "status", status, "status_code", statusCode, "body", utils.Truncate(text, 240))
+	return verifyResult
 }
 
 func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Account) *VerifyResult {
@@ -410,4 +500,37 @@ func WaitForButtonWithRefresh(
 	}
 
 	return fmt.Errorf("等待按钮出现失败，已重试 %d 次: %w", maxRetries, lastErr)
+}
+
+func qwenHeaders(token string) http.Header {
+	h := http.Header{}
+	h.Set("Authorization", "Bearer "+token)
+	h.Set("x-request-id", qwenRequestID())
+	h.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+	h.Set("Accept", "application/json, text/plain, */*")
+	h.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	h.Set("Referer", QwenBaseURL+"/")
+	h.Set("Origin", QwenBaseURL)
+	h.Set("Connection", "keep-alive")
+	h.Set("sec-ch-ua", `"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"`)
+	h.Set("sec-ch-ua-mobile", "?0")
+	h.Set("sec-ch-ua-platform", `"Windows"`)
+	h.Set("sec-fetch-dest", "empty")
+	h.Set("sec-fetch-mode", "cors")
+	h.Set("sec-fetch-site", "same-origin")
+	return h
+}
+
+func qwenRequestID() string {
+	var b [16]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		id := utils.RandomID()
+		if len(id) >= 32 {
+			return fmt.Sprintf("%s-%s-%s-%s-%s", id[:8], id[8:12], id[12:16], id[16:20], id[20:32])
+		}
+		return id
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
