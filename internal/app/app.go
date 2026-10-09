@@ -2,7 +2,12 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -69,6 +74,9 @@ func New(cfg *config.Config) (*App, error) {
 	if err := a.accounts.Load(); err != nil {
 		return nil, err
 	}
+
+	a.apiKeys, a.managedAPIKeys, a.envAPIKeys = loadAPIKeys(a.Config.DataDir + "apikeys.json")
+
 	return a, nil
 }
 
@@ -113,4 +121,61 @@ func (app *App) StartBackground(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+func loadAPIKeys(path string) (map[string]bool, map[string]bool, map[string]bool) {
+	managed := loadManagedAPIKeys(path)
+	// envKeys := loadEnvAPIKeys()
+	envKeys := make(map[string]bool)
+	all := map[string]bool{}
+	for key := range managed {
+		all[key] = true
+	}
+	for key := range envKeys {
+		all[key] = true
+	}
+	return all, managed, envKeys
+}
+
+func loadManagedAPIKeys(path string) map[string]bool {
+	keys := map[string]bool{}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return keys
+	}
+	var payload struct {
+		Keys any `json:"keys"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		slog.Warn("failed to parse api_keys.json", "error", err)
+		return keys
+	}
+	switch v := payload.Keys.(type) {
+	case []any:
+		for _, item := range v {
+			if key := strings.TrimSpace(fmt.Sprint(item)); key != "" {
+				keys[key] = true
+			}
+		}
+	case string:
+		for _, key := range splitEnvList(v) {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
+func splitEnvList(value string) []string {
+	parts := regexp.MustCompile(`[,\s;]+`).Split(value, -1)
+	out := []string{}
+	seen := map[string]bool{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
