@@ -407,3 +407,12 @@ func WriteJSONFileLocked(path string, v any) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+func FirstString(values ...any) string {
+	for _, value := range values {
+		if s, ok := value.(string); ok && strings.TrimSpace(s) != "" {
+			return s
+		}
+	}
+	return ""
+}

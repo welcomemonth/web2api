@@ -1,9 +1,12 @@
 package runtime
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/mxschmitt/playwright-go"
 	"github.com/welcomemonth/web2api/internal/config"
@@ -184,6 +187,95 @@ func (p *AccountPool) Remove(email string) error {
 	p.resetLocked()
 	p.mu.Unlock()
 	return p.store.Save(p.accounts)
+}
+
+func (p *AccountPool) HasAvailableFor(usage string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.globalMaxInflight > 0 && p.globalInUse >= p.globalMaxInflight {
+		return false
+	}
+	for _, acc := range p.accounts {
+		if acc.AvailableFor(usage) && acc.Inflight < p.maxInflightPerAccount {
+			return true
+		}
+	}
+	return false
+}
+
+func (p *AccountPool) AcquireFor(ctx context.Context, preferredEmail, usage string) (*model.Account, error) {
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		p.mu.Lock()
+		acc := p.pickLockedFor(preferredEmail, usage)
+		if acc != nil {
+			now := float64(time.Now().UnixNano()) / 1e9
+			acc.Inflight++
+			acc.LastRequestStarted = now
+			p.globalInUse++
+			p.mu.Unlock()
+			return acc, nil
+		}
+		p.mu.Unlock()
+		if time.Now().After(deadline) {
+			return nil, errors.New("no available upstream account")
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(150 * time.Millisecond):
+		}
+	}
+}
+
+func (p *AccountPool) pickLockedFor(preferredEmail, usage string) *model.Account {
+	if p.globalMaxInflight > 0 && p.globalInUse >= p.globalMaxInflight {
+		return nil
+	}
+	var candidates []*model.Account
+	for _, acc := range p.accounts {
+		if preferredEmail != "" && acc.Email != preferredEmail {
+			continue
+		}
+		if !acc.AvailableFor(usage) || acc.Inflight >= p.maxInflightPerAccount {
+			continue
+		}
+		candidates = append(candidates, acc)
+	}
+	if preferredEmail != "" && len(candidates) == 0 {
+		return p.pickLockedFor("", usage)
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Inflight != candidates[j].Inflight {
+			return candidates[i].Inflight < candidates[j].Inflight
+		}
+		return candidates[i].LastRequestStarted < candidates[j].LastRequestStarted
+	})
+	// if p.settings.RequestJitterMaxMS > 0 {
+	// 	minDelay := utils.MaxInt(p.settings.RequestJitterMinMS, 0)
+	// 	maxDelay := utils.MaxInt(p.settings.RequestJitterMaxMS, minDelay)
+	// 	time.Sleep(time.Duration(minDelay+mathrand.Intn(maxDelay-minDelay+1)) * time.Millisecond)
+	// }
+	return candidates[0]
+}
+
+func (p *AccountPool) Release(acc *model.Account) {
+	if acc == nil {
+		return
+	}
+	p.mu.Lock()
+	if acc.Inflight > 0 {
+		acc.Inflight--
+	}
+	if p.globalInUse > 0 {
+		p.globalInUse--
+	}
+	acc.LastRequestFinished = float64(time.Now().UnixNano()) / 1e9
+	p.mu.Unlock()
 }
 
 // func (p *AccountPool) Save() error {

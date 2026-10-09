@@ -244,6 +244,54 @@ func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Accoun
 	return result
 }
 
+func (q *Client) ListModelsFromPool(ctx context.Context) ([]map[string]any, error) {
+	// if !q.pool.HasAvailableFor(model.AccountUsageMetadata) {
+	// 	slog.Warn("拉取上游模型失败", "error", "no available upstream account")
+	// 	return nil, errors.New("no available upstream account")
+	// }
+
+	acc, err := q.pool.AcquireFor(ctx, "", model.AccountUsageMetadata)
+	if err != nil {
+		slog.Warn("拉取上游模型获取账号失败", "error", err)
+		return nil, err
+	}
+	defer q.pool.Release(acc)
+	slog.Info("拉取上游模型", "account", acc.Email)
+	status, text, err := q.requestJSON(ctx, http.MethodGet, "/api/models", acc.Token, nil, 20*time.Second)
+	if err != nil || status != 200 {
+		if err != nil {
+			slog.Warn("拉取上游模型请求失败", "account", acc.Email, "error", err)
+			return nil, err
+		} else {
+			slog.Warn("拉取上游模型状态异常", "account", acc.Email, "status", status, "body", utils.Truncate(text, 240))
+			return nil, fmt.Errorf("list_models HTTP %d: %s", status, utils.Truncate(text, 200))
+		}
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+		slog.Warn("解析上游模型失败", "account", acc.Email, "error", err)
+		return nil, err
+	}
+	models := extractModelList(decoded)
+	slog.Warn("拉取上游模型完成", "account", acc.Email, "count", len(models))
+	return models, nil
+}
+
+func extractModelList(decoded any) []map[string]any {
+	switch v := decoded.(type) {
+	case []any:
+		return utils.MapList(v)
+	case map[string]any:
+		if out := utils.MapList(v["data"]); len(out) > 0 {
+			return out
+		}
+		if out := utils.MapList(v["models"]); len(out) > 0 {
+			return out
+		}
+	}
+	return nil
+}
+
 // ==================== 2. 安全点击（核心复用函数） ====================
 // 多重策略：常规 → Force → JS 原生 click + 事件派发
 // 最终失败返回 error
