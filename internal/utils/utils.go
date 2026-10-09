@@ -384,3 +384,10 @@ func RedactToken(token string) string {
 	}
 	return token[:6] + "..." + token[len(token)-4:]
 }
+
+func StreamTimeoutDuration(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}

@@ -63,6 +63,15 @@ func NewClient(pool *runtime.AccountPool, browser playwright.Browser, cfg *confi
 		browserContext: context,
 		pool:           pool,
 		cfg:            cfg,
+		http: &http.Client{
+			Transport: &http.Transport{
+				Proxy: http.ProxyFromEnvironment, MaxIdleConns: 100, MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:       30 * time.Second,
+				ResponseHeaderTimeout: utils.StreamTimeoutDuration(10),
+				ForceAttemptHTTP2:     true,
+			},
+			Timeout: 5 * time.Minute,
+		},
 	}
 	return client, nil
 }
@@ -210,12 +219,26 @@ func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Accoun
 	}
 
 	// ========== 保存完整登录状态 ==========
-	if _, err := q.browserContext.StorageState(playwright.BrowserContextStorageStateOptions{
+	if state, err := q.browserContext.StorageState(playwright.BrowserContextStorageStateOptions{
 		Path: playwright.String(q.cfg.DataDir + utils.GetEmailHashFilename(account.Email)),
 	}); err != nil {
 		result.Error = err.Error()
 		result.StatusCode = ""
 		return result
+	} else {
+		for _, cookie := range state.Cookies {
+			if cookie.Name == "token" { // 注意：请确认你的 token 字段名是不是叫 "token"，有时可能是 "access_token" 或 "Authorization"
+				account.Token = cookie.Value
+			}
+		}
+		// 2. 如果 Cookies 中没有，从 LocalStorage (Origins) 中查找
+		for _, origin := range state.Origins {
+			for _, item := range origin.LocalStorage {
+				if item.Name == "token" {
+					account.Token = item.Value
+				}
+			}
+		}
 	}
 	result.Valid = true
 	return result
