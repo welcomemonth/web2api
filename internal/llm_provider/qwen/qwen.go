@@ -17,7 +17,7 @@ import (
 // ==================== 配置 ====================
 const (
 	DefaultTimeoutMs = 30000.0 // 30s
-	ShortTimeoutMs   = 5000.0  // 5s，用于快速失败
+	ShortTimeoutMs   = 10000.0 // 10s，用于快速失败
 	RetryInterval    = 300 * time.Millisecond
 	QwenBaseURL      = "https://chat.qwen.ai"
 )
@@ -37,7 +37,16 @@ type VerifyResult struct {
 
 func NewClient(pool *runtime.AccountPool, browser playwright.Browser, cfg *config.Config) (*Client, error) {
 	context, err := browser.NewContext(playwright.BrowserNewContextOptions{
-		Locale: playwright.String("zh-CN"), //TODO 后续如果批量起账号，需要有这个 语言和位置等等
+		Locale:     playwright.String("zh-CN"),
+		TimezoneId: playwright.String("Asia/Taipei"),
+		Viewport:   &playwright.Size{Width: 1280, Height: 800},
+		UserAgent:  playwright.String("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"),
+		// 关键：绕过部分自动化检测
+		ExtraHttpHeaders: map[string]string{
+			"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+		},
+		// 如果用的是 Chromium，还可以加：
+		// JavaScriptEnabled: playwright.Bool(true),
 	})
 	if err != nil {
 		slog.Error("创建 context 失败", "error", err)
@@ -68,14 +77,30 @@ func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Accoun
 		return result
 	}
 	defer page.Close()
-	// =============  打开目标网站 ===============
-	if _, err = page.Goto(QwenBaseURL+"/auth", playwright.PageGotoOptions{
-		WaitUntil: playwright.WaitUntilStateDomcontentloaded,
+
+	// 1. 先打开首页，让 SPA(Single Page Application) 完整初始化
+	if _, err = page.Goto(QwenBaseURL, playwright.PageGotoOptions{
+		WaitUntil: playwright.WaitUntilStateNetworkidle, // 比 Domcontentloaded 更稳
+		Timeout:   playwright.Float(60000),
 	}); err != nil {
-		result.Error = err.Error()
-		result.StatusCode = ""
+		result.Error = fmt.Sprintf("打开首页失败: %v", err)
 		return result
 	}
+
+	loginBtn := page.Locator("button[type='submit']").
+		Or(page.GetByRole("button", playwright.PageGetByRoleOptions{Name: "登录", Exact: playwright.Bool(true)}))
+	timeoutMs := 30000.0
+	err = loginBtn.WaitFor(playwright.LocatorWaitForOptions{Timeout: &timeoutMs})
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+
+	SafeClick(loginBtn, DefaultTimeoutMs)
+
+	// 点击后给 SPA 路由切换时间
+	time.Sleep(1500 * time.Millisecond)
+
 	// ============= 登陆 ===========
 	if err = login(page, account.Email, account.Password); err != nil {
 		result.Error = err.Error()
@@ -106,24 +131,6 @@ func (q *Client) VerifyAccountWithPwd(ctx context.Context, account *model.Accoun
 	return result
 }
 
-// ==================== 1. 清理遮挡物 ====================
-// 尽量清除可能遮挡的悬浮层、Tooltip、Modal 残留
-func ClearOverlays(page playwright.Page) {
-	// 1. 按下ESC (关闭绝大多数非模态层)
-	_ = page.Keyboard().Press("Escape")
-	time.Sleep(300 * time.Millisecond)
-
-	// 2. 可选：点击空白处关闭一些下拉/提示 (暂时注释，不确定点击哪个位置)
-	// _ = page.Mouse().Click(10, 10)
-
-	// 3. 可选：用 JS 强制移除常见遮罩（根据实际页面调整选择器）
-	_, _ = page.Evaluate(`() => {
-		document.querySelectorAll('.modal-backdrop, .overlay, .tooltip, [role="dialog"]').forEach(el => {
-			if (el.style) el.style.display = 'none';
-		});
-	}`)
-}
-
 // ==================== 2. 安全点击（核心复用函数） ====================
 // 多重策略：常规 → Force → JS 原生 click + 事件派发
 // 最终失败返回 error
@@ -132,15 +139,21 @@ func SafeClick(locator playwright.Locator, timeoutMs float64) error {
 		timeoutMs = DefaultTimeoutMs
 	}
 	short := ShortTimeoutMs
+
+	_, err := locator.Page()
+	if err != nil {
+		return err
+	}
+
 	// 先等待元素出现
 	if err := locator.WaitFor(playwright.LocatorWaitForOptions{
-		State:   playwright.WaitForSelectorStateVisible,
+		// State:   playwright.WaitForSelectorStateVisible,
 		Timeout: &timeoutMs,
 	}); err != nil {
 		return fmt.Errorf("等待元素可见失败: %w", err)
 	}
 	// 策略 1: 常规点击（带 actionability 检查）
-	err := locator.Click(playwright.LocatorClickOptions{
+	err = locator.Click(playwright.LocatorClickOptions{
 		Timeout: &short,
 	})
 	if err == nil {
@@ -166,7 +179,9 @@ func SafeClick(locator playwright.Locator, timeoutMs float64) error {
 			cancelable: true,
 			view: window
 		}));
-	}`, nil)
+	}`, playwright.LocatorEvaluateOptions{
+		Timeout: &timeoutMs, // 用较长超时
+	})
 	if err != nil {
 		return fmt.Errorf("所有点击策略均失败: %w", err)
 	}
@@ -272,18 +287,27 @@ func login(page playwright.Page, account, password string) error {
 	if account == "" || password == "" {
 		return fmt.Errorf("账号或密码不能为空")
 	}
+	emailInput := page.Locator("input[name='email']").
+		Or(page.Locator("input[placeholder='输入你的电子邮箱']")).
+		Or(page.Locator("input[placeholder*='电子邮箱']")).
+		Or(page.Locator("input[placeholder*='邮箱']")).
+		Or(page.Locator(".qwenchat-email-otp-panel-email-input input"))
 
-	// 0. 清理可能的遮挡
-	ClearOverlays(page)
-
+	// 等待输入框出现（每次最多 10 秒，失败刷新，最多重试 3 次）
+	// if err := WaitForButtonWithRefresh(page, emailInput, 10000, 3); err != nil {
+	// 	return fmt.Errorf("等待邮箱输入框出现失败: %w", err)
+	// }
+	timeoutMs := 30000.0
+	if err := emailInput.WaitFor(playwright.LocatorWaitForOptions{
+		Timeout: &timeoutMs,
+	}); err != nil {
+		return err
+	}
 	// 1. 关键存在「使用密码登录」按钮，就先点击切换
 	if err := switchToPasswordLoginIfNeeded(page); err != nil {
 		return err
 	}
 	// 2. 填写邮箱
-	emailInput := page.Locator("input[name='email']").
-		Or(page.Locator("input[placeholder*='邮箱']")).
-		Or(page.Locator(`[data-gtm-form-interact-field-id="0"]`))
 
 	if err := SafeFill(emailInput, account, DefaultTimeoutMs); err != nil {
 		return fmt.Errorf("填写邮箱失败: %w", err)
@@ -326,4 +350,64 @@ func login(page playwright.Page, account, password string) error {
 
 	slog.Info("✓ 已触发登录，等待页面响应...")
 	return nil
+}
+
+// WaitForButtonWithRefresh 等待指定按钮出现
+// 每次最多等 timeoutPerTry（默认 10 秒），失败则刷新页面，最多重试 maxRetries 次（默认 3 次）
+// 成功返回 nil，全部失败返回 error
+func WaitForButtonWithRefresh(
+	page playwright.Page,
+	locator playwright.Locator,
+	timeoutPerTry float64, // 每次等待超时（毫秒），建议 10000
+	maxRetries int, // 最大尝试次数，建议 3
+) error {
+	if timeoutPerTry <= 0 {
+		timeoutPerTry = 10000 // 默认 10 秒
+	}
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
+	var lastErr error
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		slog.Info("等待按钮出现", "attempt", attempt, "max", maxRetries)
+
+		err := locator.WaitFor(playwright.LocatorWaitForOptions{
+			State:   playwright.WaitForSelectorStateVisible,
+			Timeout: &timeoutPerTry,
+		})
+
+		if err == nil {
+			// 再确认一次是否真正可交互（可选增强）
+			if IsInteractable(locator, 2000) {
+				slog.Info("✓ 按钮已出现且可交互", "attempt", attempt)
+				return nil
+			}
+			// 可见但不可交互，也算失败，继续重试
+			lastErr = fmt.Errorf("按钮可见但不可交互")
+		} else {
+			lastErr = err
+			slog.Warn("等待按钮超时", "attempt", attempt, "err", err)
+		}
+
+		// 最后一次失败就不再刷新
+		if attempt == maxRetries {
+			break
+		}
+
+		slog.Info("准备刷新页面后重试...", "next_attempt", attempt+1)
+		if _, err := page.Reload(playwright.PageReloadOptions{
+			Timeout:   playwright.Float(15000),
+			WaitUntil: playwright.WaitUntilStateDomcontentloaded, // 或 Load / Networkidle
+		}); err != nil {
+			slog.Warn("页面刷新失败", "err", err)
+			// 即使刷新失败也继续下一次尝试
+		}
+
+		// 刷新后给页面一点稳定时间
+		time.Sleep(1500 * time.Millisecond)
+	}
+
+	return fmt.Errorf("等待按钮出现失败，已重试 %d 次: %w", maxRetries, lastErr)
 }
